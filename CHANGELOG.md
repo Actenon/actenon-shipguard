@@ -2,6 +2,19 @@
 
 All notable changes to Actenon ShipGuard. This project adheres to semantic versioning.
 
+## [0.1.1] - 2026-11-01 — pre-release
+
+### Fixed
+- CI workflow YAML parsed incorrectly (a plain `run:` scalar contained `: `), causing a
+  workflow-file failure. Now a block scalar.
+- Tests resolve `tsx` portably (PATH / `SHIPGUARD_TSX` / lab fallback) so a fresh checkout with
+  globally-installed tsx works; they skip cleanly when tsx is absent.
+
+### Verified
+- GitHub Actions CI **green** on `ubuntu-latest`, matrix Python 3.11 + 3.12 (run 41354658157):
+  pinned install, `doctor`, 13 adversarial tests, and the offline demo all pass — a genuine
+  fresh-install reproduction on Linux.
+
 ## [0.1.0] - 2026-11-01 — pre-release
 
 First pre-release. **Not** a stable v1.0.0 — see `RELEASE-EVIDENCE.md` for the release-gate

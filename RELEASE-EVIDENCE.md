@@ -1,4 +1,4 @@
-# RELEASE-EVIDENCE.md — Actenon ShipGuard v0.1.0 (pre-release)
+# RELEASE-EVIDENCE.md — Actenon ShipGuard v0.1.1 (pre-release)
 
 Every headline claim below links to inspectable evidence or is marked **BLOCKER** with the
 exact reproducible reason. Nothing here is inferred from a string in stdout.
@@ -17,7 +17,9 @@ and npm publication is not done.
 - Foundation experiment (preserved, unmodified): `rossbuckley1990-hash/one-action-kernel`
   starting commit **`8cc95c48d9a4839481095bc0fd194192ad1533b2`**.
 - Product repository: `Actenon/actenon-shipguard` (created fresh; no existing repo/package overwritten).
-- This release: tag **`v0.1.0`** (the tagged commit is the exact release identity).
+- Release history: `v0.1.0` (commit `03c4b73`) shipped with a CI workflow-YAML bug; fixed on `main`
+  at `0254639`. This pre-release is **`v0.1.1`** (CI green). No tag was force-moved or release
+  silently replaced — the version was bumped forward instead.
 
 ## 2. Pinned dependency identities (no moving main branches)
 
@@ -116,17 +118,22 @@ equivalence, dependency-change review, hidden-input access, Howdex promotion, st
 unsupported language, agent CLI unavailable, missing dependency, interrupted/resumed session,
 fresh-clone, fixture tamper).
 
-## 13. CI results — **BLOCKER (workflow added, not yet executed)**
+## 13. CI results — **GREEN (executed on GitHub)**
 
-`.github/workflows/ci.yml` and `action.yml` are committed but have **not run on GitHub** at the
-time of writing. No CI result is claimed. They will execute on push; results must be inspected
-before any v1.0.0 claim.
+`.github/workflows/ci.yml` ran on push to `main`: run
+[41354658157](https://github.com/Actenon/actenon-shipguard/actions/runs/41354658157) — **success**
+on `ubuntu-latest`, matrix Python 3.11 (26s) + 3.12 (28s). Steps: pinned `pip install -e '.[dev]'`,
+global `tsx`, `actenon-shipguard doctor`, `pytest -q` (13 passed), and the offline demo (ALLOW
+verdict confirmed). Only non-blocking annotations (Node 20 deprecation; ubuntu-latest migration).
+The initial `v0.1.0` tag predates a workflow-YAML fix; CI is green from commit `0254639` (v0.1.1).
+The consumable GitHub Action (`action.yml`) is committed but has **not** been exercised as a
+third-party action — that validation remains a blocker.
 
-## 14. Fresh-install reproduction — **PARTIAL**
+## 14. Fresh-install reproduction — **PARTIAL (Linux CI + macOS local)**
 
-Reproduced locally in a clean pinned venv on Apple Silicon macOS (Python 3.14.6). Cross-platform
-(Linux) fresh-install and a from-the-published-package reproduction are **BLOCKERS** (the package
-is not yet on PyPI/npm).
+Reproduced from a fresh checkout on GitHub-hosted `ubuntu-latest` (CI run 41354658157, Python 3.11
++ 3.12) and locally in a clean pinned venv on Apple Silicon macOS (Python 3.14.6). A
+from-the-published-PyPI/npm-package reproduction remains a **BLOCKER** (not yet distributed).
 
 ## 15. Benchmark measurements — **BLOCKER**
 
@@ -155,7 +162,7 @@ variations of it).
 2. Howdex real traces + held-out transfer benchmark (§9).
 3. Workproof independent verification with negative controls (§10).
 4. Full 28-case adversarial matrix (§12).
-5. CI green on GitHub + GitHub Action validated (§13).
+5. GitHub Action (`action.yml`) validated as a consumed action (the CI workflow itself is green, §13).
 6. Multi-project aspirin benchmark with held-out cases (§15).
 7. Zero-friction polyglot onboarding (bundle Sentinel + tsx; no manual venvs) and cross-platform
    fresh-install reproduction (§14).
@@ -163,9 +170,11 @@ variations of it).
 
 ## 18. Honest go/no-go
 
-**NO-GO for v1.0.0. Ship v0.1.0 pre-release.** The mandatory trust-boundary work (§6 A–E) is
-complete and adversarially validated; the developer-facing real-agent product, benchmarks, CI and
-distribution are not. Publishing v1.0.0 now would overstate the evidence.
+**NO-GO for v1.0.0. Ship v0.1.1 pre-release.** The mandatory trust-boundary work (§6 A–E) is
+complete and adversarially validated, and CI is green on a fresh Linux checkout (Python 3.11 +
+3.12); the developer-facing real-agent product, memory/attestation integration, benchmarks, full
+adversarial matrix and package distribution are not. Publishing v1.0.0 now would overstate the
+evidence.
 
 ## Distribution / naming verification (per mandate §1)
 

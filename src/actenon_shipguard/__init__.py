@@ -8,7 +8,7 @@ agent), and the requester/agent (holds no signing key).
 """
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from .trust import (
     KeyPair, TrustRoots, TrustRoot, UntrustedKeyError,
