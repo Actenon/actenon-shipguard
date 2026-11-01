@@ -168,12 +168,20 @@ def mint_proof(
     return minter.mint(intent, decision, context)
 
 
-def verify_proof(*, trust_roots: TrustRoots, key_id: str, intent_payload: dict[str, Any], pccb_payload: dict[str, Any], now: datetime, request_id: str):
-    """Verify a PCCB at the edge using a public-only verifier from pinned trust roots."""
+def verify_proof(*, trust_roots: TrustRoots, intent_payload: dict[str, Any], pccb_payload: dict[str, Any],
+                 now: datetime, request_id: str, key_id: str | None = None):
+    """Verify a PCCB at the edge using a public-only verifier resolved from PINNED trust roots.
+
+    The authority identity is taken from the AUTHENTICATED proof data (``pccb.signature.key_id``),
+    not from caller assertion, and must resolve to a pinned authority root (else UntrustedKeyError).
+    """
     from actenon.models import AudienceRef, DynamicContextInput
     from actenon.verifier import VerifierSDK
 
-    verifier = AuthorityVerifier(trust_roots, key_id)
+    kid = key_id or (pccb_payload.get("signature") or {}).get("key_id")
+    if not kid:
+        raise ValueError("proof carries no signer key_id; cannot resolve authority identity")
+    verifier = AuthorityVerifier(trust_roots, kid)  # raises UntrustedKeyError if not pinned/substituted
     action = intent_payload["action"]
     context = DynamicContextInput(
         request_id=request_id,

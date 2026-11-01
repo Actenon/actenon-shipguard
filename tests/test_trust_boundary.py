@@ -26,6 +26,10 @@ from actenon_shipguard import (
 from actenon_shipguard.certs import verify_certificate
 from actenon_shipguard.proofs import AuthorityVerifier
 from actenon_shipguard.cli import _find_tsx
+from actenon_shipguard.nonce import ReconciliationVerifier, sign_reconciliation_statement, RESERVED
+from actenon_shipguard.trust import (
+    sign_domain, verify_domain, DOMAIN_CORRECTNESS_CERT, DOMAIN_RECONCILIATION,
+)
 
 PKG = Path(__file__).resolve().parents[1]
 FIXTURES = PKG / "fixtures"
@@ -164,10 +168,9 @@ def _contract_file(tmp_path, contract) -> Path:
 def make_gate(tmp_path, action, tsx=TSX):
     nonce_store = NonceStore(tmp_path / f"nonces-{uuid.uuid4().hex[:6]}.db")
     out_dir = tmp_path / f"out-{uuid.uuid4().hex[:6]}"
-    resource = ProtectedResource(trust_roots=action["roots"], authority_key_id=action["issuer"].key_id,
-                                 tsx=tsx, out_dir=out_dir)
-    gate = EdgeGate(trust_roots=action["roots"], issuer_signer=action["issuer"], nonce_store=nonce_store,
-                    resource=resource, ledger=out_dir / "ledger.jsonl")
+    resource = ProtectedResource(trust_roots=action["roots"], tsx=tsx, out_dir=out_dir,
+                                 nonce_store=nonce_store, ledger=out_dir / "ledger.jsonl")
+    gate = EdgeGate(resource=resource)
     return gate, nonce_store, resource, out_dir
 
 
@@ -303,15 +306,21 @@ def test_nonce_store_survives_restart(tmp_path):
     s2.close()
 
 
-def test_bypass_resource_without_authorization_refused(tmp_path, trust, contract):
+def test_enforcer_keyless_and_tampered_proof_refused(tmp_path, trust, contract):
+    import copy
     a = make_action(tmp_path, trust, contract, ARM_B)
     gate, nonces, resource, out = make_gate(tmp_path, a)
-    from actenon_shipguard.gate import GateAuthorization
-    forged = GateAuthorization(nonce="x", code_artifact_sha256=a["cert"].code_artifact_sha256, module_path=MODULE,
-                               export=EXPORT, parameters={"total_pence": 1000000, "parties": 3}, resource_id="ledger-1",
-                               expires_at="2099-01-01T00:00:00Z", signature="")
-    with pytest.raises(PermissionError):
-        resource.execute(forged, a["code"])  # no valid issuer signature -> refused, no side effect
+    # P0 signing separation: the enforcer / protected resource holds NO private signing material.
+    assert resource.holds_signing_key() is False
+    assert not hasattr(gate, "_issuer") and not hasattr(gate, "_signer")
+    # The only execute path re-verifies the primary evidence; a tampered proof is refused, no side effect.
+    tampered = copy.deepcopy(a["pccb"]); tampered["action"]["parameters"]["total_pence"] = 999
+    d = resource.verify_and_execute(
+        intent_payload=a["intent"], pccb_payload=tampered, cert=a["cert"], code_path=a["code"],
+        module_path=MODULE, export=EXPORT,
+        parameters={"total_pence": 999, "parties": 3, "allocation_id": "alloc-1"},
+        resource_id="ledger-1", now=a["now"])
+    assert d.decision == "REFUSE" and d.layer == "AUTHORITY", d
     assert not (out / "disbursement.json").exists()
 
 
@@ -411,3 +420,81 @@ def test_receipt_incomplete_coverage_rejected(tmp_path, contract):
     rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
                                  candidate_repo=repo, module_path=MODULE, expected_head=head)
     assert not rv.ok and any("no VERIFIED matching check" in r for r in rv.reasons), rv.reasons
+
+
+# --------------------------------------------------------------------------- #
+# P1 nonce reconciliation: trusted internal verifier, not a caller callback
+# --------------------------------------------------------------------------- #
+def _uncertain_store(tmp_path, roots):
+    store = NonceStore(tmp_path / "recon.db", recon_verifier=ReconciliationVerifier(roots, policy_revision="1"))
+    store.reserve(nonce="n-uncertain", pccb_id="pccb-1", effect_id="eff-1")
+    return store
+
+
+def test_reconciliation_valid_signed_evidence_resolves(tmp_path, trust):
+    roots, kp = trust
+    store = _uncertain_store(tmp_path, roots)
+    ev = sign_reconciliation_statement(kp["reconciliation"], nonce="n-uncertain", pccb_id="pccb-1",
+                                       effect_id="eff-1", resource_id="ledger-1", resolution="committed",
+                                       outcome={"confirmed_by": "resource-readback"}, policy_revision="1")
+    rec = store.reconcile(nonce="n-uncertain", resolution="committed", evidence=ev, resource_id="ledger-1")
+    assert rec.state == "committed"
+
+
+def test_reconciliation_forged_signer_rejected(tmp_path, trust):
+    roots, kp = trust
+    store = _uncertain_store(tmp_path, roots)
+    rogue = KeyPair.generate("reconciliation", "rogue-recon-v1")  # NOT pinned in trust roots
+    ev = sign_reconciliation_statement(rogue, nonce="n-uncertain", pccb_id="pccb-1", effect_id="eff-1",
+                                       resource_id="ledger-1", resolution="committed", outcome={"x": 1})
+    with pytest.raises(ReplayRefused) as ei:
+        store.reconcile(nonce="n-uncertain", resolution="committed", evidence=ev, resource_id="ledger-1")
+    assert ei.value.code == "RECONCILE_EVIDENCE_INVALID"
+    assert store.get("n-uncertain").state == RESERVED  # stays uncertain (fail closed)
+
+
+def test_reconciliation_wrong_effect_rejected(tmp_path, trust):
+    roots, kp = trust
+    store = _uncertain_store(tmp_path, roots)
+    ev = sign_reconciliation_statement(kp["reconciliation"], nonce="n-uncertain", pccb_id="pccb-1",
+                                       effect_id="DIFFERENT-effect", resource_id="ledger-1",
+                                       resolution="committed", outcome={"x": 1})
+    with pytest.raises(ReplayRefused) as ei:
+        store.reconcile(nonce="n-uncertain", resolution="committed", evidence=ev, resource_id="ledger-1")
+    assert ei.value.code == "RECONCILE_EVIDENCE_INVALID"
+    assert store.get("n-uncertain").state == RESERVED
+
+
+def test_reconciliation_no_callback_injection(tmp_path, trust):
+    # reconcile() accepts NO caller callback; arbitrary/forged evidence cannot resolve an uncertain nonce.
+    roots, kp = trust
+    store = _uncertain_store(tmp_path, roots)
+    forged = {"body": {"schema": "shipguard/reconciliation/v1", "nonce": "n-uncertain", "pccb_id": "pccb-1",
+                       "effect_id": "eff-1", "resource_id": "ledger-1", "resolution": "committed",
+                       "outcome": {}, "policy_revision": "1", "issued_at": "2099-01-01T00:00:00Z",
+                       "reconciler": "x"},
+              "key_id": kp["reconciliation"].key_id, "signature": "AAAAAAAAAAAAAAAA"}
+    with pytest.raises(ReplayRefused):
+        store.reconcile(nonce="n-uncertain", resolution="committed", evidence=forged, resource_id="ledger-1")
+    assert store.get("n-uncertain").state == RESERVED
+
+
+def test_reconciliation_unavailable_verifier_fails_closed(tmp_path, trust):
+    roots, kp = trust
+    store = NonceStore(tmp_path / "recon2.db")  # NO trusted verifier configured
+    store.reserve(nonce="n2", pccb_id="p", effect_id="e")
+    ev = sign_reconciliation_statement(kp["reconciliation"], nonce="n2", pccb_id="p", effect_id="e",
+                                       resource_id="ledger-1", resolution="committed", outcome={"x": 1})
+    with pytest.raises(ReplayRefused) as ei:
+        store.reconcile(nonce="n2", resolution="committed", evidence=ev, resource_id="ledger-1")
+    assert ei.value.code == "RECONCILE_UNAVAILABLE"
+    assert store.get("n2").state == RESERVED
+
+
+def test_cross_domain_signature_rejected(tmp_path, trust):
+    # A signature minted for the correctness-cert domain must not verify under the reconciliation domain.
+    roots, kp = trust
+    body = {"x": 1}
+    sig = sign_domain(kp["correctness"], DOMAIN_CORRECTNESS_CERT, body)
+    assert verify_domain(kp["correctness"].public_key, DOMAIN_CORRECTNESS_CERT, body, sig) is True
+    assert verify_domain(kp["correctness"].public_key, DOMAIN_RECONCILIATION, body, sig) is False

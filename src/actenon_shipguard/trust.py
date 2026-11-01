@@ -33,9 +33,18 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-ROLE_AUTHORITY = "authority"        # Actenon proof issuer
-ROLE_CORRECTNESS = "correctness"    # correctness-certificate prover
-KNOWN_ROLES = (ROLE_AUTHORITY, ROLE_CORRECTNESS)
+ROLE_AUTHORITY = "authority"            # Actenon proof issuer (signs PCCBs)
+ROLE_CORRECTNESS = "correctness"        # correctness-certificate prover (signs certs)
+ROLE_RECONCILIATION = "reconciliation"  # operator authority (signs reconciliation evidence)
+KNOWN_ROLES = (ROLE_AUTHORITY, ROLE_CORRECTNESS, ROLE_RECONCILIATION)
+
+# Versioned signature domain separation: every signed object embeds its domain tag in the
+# canonicalised signed payload, and verifiers require an exact match, so a signature minted
+# for one purpose (e.g. a correctness certificate) can never be replayed as another (e.g.
+# reconciliation evidence) even under the same key.
+DOMAIN_CORRECTNESS_CERT = "shipguard/correctness-cert/v1"
+DOMAIN_RECONCILIATION = "shipguard/reconciliation/v1"
+DOMAIN_LEDGER = "shipguard/ledger/v1"
 
 
 def b64u_encode(raw: bytes) -> str:
@@ -201,22 +210,48 @@ class UntrustedKeyError(Exception):
 
 
 def generate_trust_roots(out_dir: Path, policy_revision: str = "1") -> tuple[TrustRoots, dict[str, KeyPair]]:
-    """Bootstrap a separated trust boundary: one authority key, one correctness key.
+    """Bootstrap a separated trust boundary: authority, correctness and reconciliation keys.
 
-    Private keys are written to ``keys/`` with 0600 perms (held by the respective
-    authorities, never by the enforcer or the agent); the pinned public trust roots
-    are written to ``trust-roots.json``. Production custody (KMS/HSM) is a swap of
-    the KeyPair signer, not of this boundary layout.
+    Private keys are written to ``keys/`` (0600), held by the respective SEPARATE authorities —
+    never by the enforcer or the coding agent. The pinned PUBLIC trust roots go to
+    ``trust-roots.json``; only that file is needed to verify.
+
+    DOCUMENTED LIMITATION (P0-key-storage): on a single unrestricted OS user, a 0600 directory
+    outside the workspace is NOT hostile-agent-resistant isolation — a same-user agent with read
+    access could still reach it. Cooperative local development only; the stronger
+    hostile-agent-resistant mode requires a restricted service account / container / KMS-HSM and
+    must fail closed when unavailable. See SECURITY-REMEDIATION-v0.1.2.md.
     """
     out_dir = Path(out_dir)
     keys_dir = out_dir / "keys"
     keys_dir.mkdir(parents=True, exist_ok=True)
     authority = KeyPair.generate(ROLE_AUTHORITY, "shipguard-authority-v1")
     correctness = KeyPair.generate(ROLE_CORRECTNESS, "shipguard-correctness-v1")
-    for kp in (authority, correctness):
+    reconciliation = KeyPair.generate(ROLE_RECONCILIATION, "shipguard-reconciliation-v1")
+    for kp in (authority, correctness, reconciliation):
         p = keys_dir / f"{kp.role}-{kp.key_id}.pem"
         p.write_bytes(kp.private_pem())
         os.chmod(p, 0o600)
-    roots = TrustRoots.from_keypairs([authority, correctness], policy_revision=policy_revision)
+    roots = TrustRoots.from_keypairs([authority, correctness, reconciliation], policy_revision=policy_revision)
     roots.write(out_dir / "trust-roots.json")
-    return roots, {"authority": authority, "correctness": correctness}
+    return roots, {"authority": authority, "correctness": correctness, "reconciliation": reconciliation}
+
+
+def sign_domain(keypair: KeyPair, domain: str, body: dict[str, Any]) -> str:
+    """Sign a canonicalised, domain-separated statement.
+
+    The versioned ``domain`` tag is bound INTO the signed payload, so a signature minted for one
+    object type can never be replayed as another (cross-domain separation), even under one key.
+    """
+    from actenon_protocol import canonicalize_bytes
+    return b64u_encode(keypair.sign(canonicalize_bytes({"domain": domain, "body": body})))
+
+
+def verify_domain(public_key: Ed25519PublicKey, domain: str, body: dict[str, Any], signature_b64: str) -> bool:
+    """Verify a domain-separated signature; False on any mismatch (incl. wrong domain)."""
+    from actenon_protocol import canonicalize_bytes
+    try:
+        public_key.verify(b64u_decode(signature_b64), canonicalize_bytes({"domain": domain, "body": body}))
+        return True
+    except Exception:
+        return False

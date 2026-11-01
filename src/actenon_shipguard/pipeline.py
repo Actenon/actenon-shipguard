@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .certs import build_certificate
-from .gate import EdgeGate, GateAuthorization, ProtectedResource
+from .gate import EdgeGate, ProtectedResource
 from .nonce import NonceStore, ReplayRefused
 from .proofs import AuthoritySigner, build_intent, mint_proof
 from .receipts import verify_sentinel_receipt
@@ -126,9 +126,9 @@ def _mint(tmp, roots, keypairs, contract, candidate, tsx, *, prover=None, status
 
 def _gate(tmp, a, tsx, out_dir):
     nonces = NonceStore(tmp / f"nonces-{uuid.uuid4().hex[:6]}.db")
-    resource = ProtectedResource(trust_roots=a["roots"], authority_key_id=a["issuer"].key_id, tsx=tsx, out_dir=out_dir)
-    gate = EdgeGate(trust_roots=a["roots"], issuer_signer=a["issuer"], nonce_store=nonces,
-                    resource=resource, ledger=out_dir / "ledger.jsonl")
+    resource = ProtectedResource(trust_roots=a["roots"], tsx=tsx, out_dir=out_dir,
+                                 nonce_store=nonces, ledger=out_dir / "ledger.jsonl")
+    gate = EdgeGate(resource=resource)
     return gate, nonces, resource, out_dir
 
 
@@ -192,19 +192,25 @@ def run_demo(work_dir: Path, tsx: Path, *, trials: int = 200000) -> dict[str, An
     g6, *_ = _gate(tmp, a6, tsx, work / "out-rogue")
     record("6 certificate signed by untrusted prover key", _exec(g6, a6))
 
-    # 7. bypass: call the resource directly without a gate authorization
+    # 7. bypass: the enforcer holds NO signing key, and its only execute path re-verifies the
+    #    primary evidence — a tampered proof presented directly to the resource is refused.
+    import copy
     out7 = work / "out-bypass"
     _, _, r7, _ = _gate(tmp, aB, tsx, out7)
-    forged = GateAuthorization(nonce="x", code_artifact_sha256=aB["cert"].code_artifact_sha256, module_path=MODULE,
-                               export=EXPORT, parameters={"total_pence": 1000000, "parties": 3}, resource_id="ledger-1",
-                               expires_at="2099-01-01T00:00:00Z", signature="")
-    try:
-        r7.execute(forged, aB["code"]); bypass = "EXECUTED (FAIL)"
-    except PermissionError:
-        bypass = "REFUSED (no side effect)"
-    scenarios.append({"scenario": "7 direct resource call without gate authorization",
-                      "decision": "REFUSE", "layer": "ENFORCEMENT", "code": "NO_AUTHORIZATION", "reason": bypass})
-    print(f"  {'7 direct resource call without gate authorization':48s} -> {bypass}")
+    holds_key = r7.holds_signing_key()
+    tampered = copy.deepcopy(aB["pccb"])
+    tampered["action"]["parameters"]["total_pence"] = 999  # breaks the signed action_hash
+    d7 = r7.verify_and_execute(intent_payload=aB["intent"], pccb_payload=tampered, cert=aB["cert"],
+                               code_path=aB["code"], module_path=MODULE, export=EXPORT,
+                               parameters={"total_pence": 999, "parties": 3, "allocation_id": "alloc-1"},
+                               resource_id="ledger-1", now=aB["now"])
+    no_effect = not (out7 / "disbursement.json").exists()
+    bypass_ok = (d7.decision == "REFUSE") and no_effect and (not holds_key)
+    scenarios.append({"scenario": "7 enforcer is key-less; tampered proof refused at the only execute path",
+                      "decision": d7.decision if bypass_ok else "ALLOW", "layer": "ENFORCEMENT",
+                      "code": "KEYLESS_ENFORCER" if bypass_ok else "ENFORCER_HAS_KEY_OR_BYPASSED",
+                      "reason": f"holds_signing_key={holds_key}; decision={d7.decision}; side_effect_written={not no_effect}"})
+    print(f"  {'7 enforcer key-less + tampered proof refused':48s} -> {d7.decision} (holds_signing_key={holds_key})")
 
     summary = {
         "mode": "offline-deterministic",
