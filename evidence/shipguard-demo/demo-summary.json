@@ -1,0 +1,81 @@
+{
+  "mode": "offline-deterministic",
+  "generated_at": "2026-11-01T21:50:12.098615Z",
+  "authority_signer": {
+    "algorithm": "Ed25519",
+    "key_id": "shipguard-authority-v1"
+  },
+  "correctness_prover": {
+    "algorithm": "Ed25519",
+    "key_id": "shipguard-correctness-v1"
+  },
+  "trust_roots_file": "/Users/ross/Documents/Qoder/2026-11-01/d649cff7/agent-lab/actenon-shipguard/evidence/shipguard-demo/trust/trust-roots.json",
+  "property_trials": 200000,
+  "scenarios": [
+    {
+      "scenario": "1 correct fix (authorised + class-verified)",
+      "decision": "ALLOW",
+      "layer": "OK",
+      "code": "AUTHORISED_AND_CORRECT",
+      "reason": "authority proof + correctness cert + exact-code binding verified; certified code invoked; nonce committed",
+      "shares": [
+        333334,
+        333333,
+        333333
+      ],
+      "conserved": true
+    },
+    {
+      "scenario": "2 wrong fix, green tests, valid authority",
+      "decision": "REFUSE",
+      "layer": "CORRECTNESS",
+      "code": "NOT_VERIFIED",
+      "reason": "correctness NOT_VERIFIED (property=VIOLATED, sentinel_ok=True, failed_checks=[])",
+      "property_verdict": "VIOLATED"
+    },
+    {
+      "scenario": "3 certified for B, executed bytes swapped to A",
+      "decision": "REFUSE",
+      "layer": "CORRECTNESS",
+      "code": "CODE_ARTIFACT_MISMATCH",
+      "reason": "proof-bound 755e8a8397ef\u2026 / cert 755e8a8397ef\u2026 / actual 6c8373a2de2e\u2026 disagree"
+    },
+    {
+      "scenario": "4 blind replay of the committed disbursement",
+      "decision": "REFUSE",
+      "layer": "REPLAY",
+      "code": "NONCE_REUSED",
+      "reason": "nonce nonce-4378b12f already committed; refusing duplicate consequential effect"
+    },
+    {
+      "scenario": "5a crash mid-effect (nonce reserved, no record)",
+      "decision": "REFUSE",
+      "layer": "EXECUTION",
+      "code": "EFFECT_UNCERTAIN",
+      "reason": "side effect did not confirm (simulated crash mid-effect); nonce left RESERVED \u2014 reconcile with evidence, do not blind-retry",
+      "nonce_state": "reserved",
+      "disbursement_written": false
+    },
+    {
+      "scenario": "5b blind retry of uncertain outcome",
+      "decision": "REFUSE",
+      "layer": "REPLAY",
+      "code": "UNCERTAIN_OUTCOME",
+      "reason": "nonce nonce-bcdf788d is reserved with an unresolved outcome (prior attempt may have crashed mid-effect); refusing blind retry \u2014 reconcile with signed evidence first"
+    },
+    {
+      "scenario": "6 certificate signed by untrusted prover key",
+      "decision": "REFUSE",
+      "layer": "CORRECTNESS",
+      "code": "CERT_UNTRUSTED",
+      "reason": "UNTRUSTED_PROVER: no active pinned correctness trust root for key_id='rogue-prover-v1'"
+    },
+    {
+      "scenario": "7 direct resource call without gate authorization",
+      "decision": "REFUSE",
+      "layer": "ENFORCEMENT",
+      "code": "NO_AUTHORIZATION",
+      "reason": "REFUSED (no side effect)"
+    }
+  ]
+}

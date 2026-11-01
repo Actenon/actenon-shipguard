@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "actenon-shipguard"
+version = "0.1.0"
+description = "Your AI agent says it's done. ShipGuard checks before it ships — independent verification + protected consequential execution for AI coding agents."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Actenon" }]
+keywords = ["ai-agents", "verification", "agent-security", "proofs", "receipts", "ci", "mcp"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Security",
+]
+
+# PINNED released versions only — no moving upstream main branches.
+# The fusion binds correctness evidence through the Actenon action `constraints`
+# (covered by the signed action_hash), which is supported by these stable releases.
+dependencies = [
+  "actenon-kernel==1.2.1",
+  "actenon-protocol==1.4.0",
+  "actenon-permit==1.4.0",
+  "actenon-scan==1.5.0",
+  "cryptography==44.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==8.3.4", "ruff==0.8.4"]
+
+[project.scripts]
+actenon-shipguard = "actenon_shipguard.cli:main"
+shipguard = "actenon_shipguard.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Actenon/actenon-shipguard"
+Issues = "https://github.com/Actenon/actenon-shipguard/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]

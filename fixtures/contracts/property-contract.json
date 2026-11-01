@@ -1,0 +1,15 @@
+{
+  "module": "src/settle.ts",
+  "export": "allocate",
+  "seed": 1234567,
+  "argDomain": [
+    { "name": "totalPence", "type": "int", "min": 0, "max": 200000 },
+    { "name": "parties", "type": "int", "min": 1, "max": 16 }
+  ],
+  "exhaustiveSmallGrid": {
+    "totalPence": [0, 1, 2, 3, 5, 7, 10, 100, 999, 1000000],
+    "parties": [1, 2, 3, 4, 5, 7, 16]
+  },
+  "invariants": ["conservation", "length", "non_negative", "fair_spread", "deterministic"],
+  "trials": 200000
+}

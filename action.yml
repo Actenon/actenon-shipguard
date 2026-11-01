@@ -1,0 +1,59 @@
+name: "Actenon ShipGuard"
+description: "Independent verification gate for AI-agent changes. Refuses unverified or unauthorised consequential actions."
+author: "Actenon"
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  command:
+    description: "ShipGuard subcommand to run (demo | verify | doctor)"
+    required: false
+    default: "demo"
+  trials:
+    description: "Property-verification trials for the deterministic demo"
+    required: false
+    default: "20000"
+  python-version:
+    description: "Python version"
+    required: false
+    default: "3.11"
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+    - name: Install ShipGuard (pinned)
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e '.[dev]'
+        npm install -g tsx
+    - name: Diagnostics
+      shell: bash
+      run: actenon-shipguard doctor
+    - name: Run ShipGuard
+      shell: bash
+      run: |
+        if [ "${{ inputs.command }}" = "demo" ]; then
+          actenon-shipguard demo --out shipguard-evidence --trials "${{ inputs.trials }}"
+        else
+          actenon-shipguard ${{ inputs.command }}
+        fi
+    - name: Upload evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: shipguard-evidence
+        path: shipguard-evidence/
+        if-no-files-found: ignore
+
+# NOTE (honest scope): full Mode B PR protection — verifying the exact PR head SHA against a
+# separately approved acceptance contract in a fresh environment and posting a required merge
+# check — is a tracked v0.1.0 blocker. This action currently runs the deterministic gate demo
+# and uploads evidence; it does not yet execute untrusted PR code or gate a merge.

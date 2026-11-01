@@ -1,0 +1,4 @@
+node_modules
+# Apprentice local state
+.apprentice/
+.workproof/

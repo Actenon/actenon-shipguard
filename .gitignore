@@ -1,0 +1,32 @@
+# NEVER commit key material — prover/authority private keys are generated per run
+*.pem
+*.key
+**/keys/
+.shipguard/keys/
+
+# Transient demo/test working dirs (temp git repos, content-addressed stores, nonce DBs)
+evidence/**/tmp/
+**/tmp/
+*.db
+*.db-wal
+*.db-shm
+nonces-*.db*
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Node (only needed for the bundled TS verifier fixtures)
+node_modules/
+
+# npm credentials — must never be committed
+.npmrc
+npm-debug.log*
+
+# OS / editor
+.DS_Store

@@ -1,0 +1,15 @@
+{
+  "allocation_id": "alloc-1",
+  "code_artifact_sha256": "755e8a8397efb9c02c387c87e89f4c53e20637b7933a75f9b9607ee770fa9ee7",
+  "conserved": true,
+  "executed_at": "2026-11-01T21:50:10.267883Z",
+  "nonce": "nonce-4378b12f",
+  "parties": 3,
+  "resource_id": "ledger-1",
+  "shares": [
+    333334,
+    333333,
+    333333
+  ],
+  "total_pence": 1000000
+}

@@ -1,0 +1,35 @@
+{
+  "policy_revision": "1",
+  "roots": [
+    {
+      "key_id": "shipguard-authority-v1",
+      "not_after": null,
+      "not_before": null,
+      "public_jwk": {
+        "alg": "EdDSA",
+        "crv": "Ed25519",
+        "kid": "shipguard-authority-v1",
+        "kty": "OKP",
+        "use": "sig",
+        "x": "pLL46OQtPt2jojg2MRnjTgpgHSZbQ-ukbdyx4l-Bfts"
+      },
+      "role": "authority",
+      "thumbprint": "ab91e417692b8c33fb7a8830c3311f95fdb37cd25c7ede37428d198a84c6a540"
+    },
+    {
+      "key_id": "shipguard-correctness-v1",
+      "not_after": null,
+      "not_before": null,
+      "public_jwk": {
+        "alg": "EdDSA",
+        "crv": "Ed25519",
+        "kid": "shipguard-correctness-v1",
+        "kty": "OKP",
+        "use": "sig",
+        "x": "5tBHfTuzvp981vZpmq4CTH-2KsrK0b3IkcN5oDTMY4o"
+      },
+      "role": "correctness",
+      "thumbprint": "76d2ce71427f2b344fa2954dee9f55a3f99f4e0e7b7a1d2925f096411c5b5736"
+    }
+  ]
+}

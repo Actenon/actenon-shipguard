@@ -1,0 +1,1 @@
+{"authority_signature": "KZFdJtfazVrpR_3tmvhYBX4d7EJMZgiN_zHj8nERTjnTlP6vmOTPcJwIx-3FdgYVWePAEdFaGh7hi81b_Oy4Bw", "record": {"code": "CERT_UNTRUSTED", "decision": "REFUSE", "evidence": {}, "layer": "CORRECTNESS", "reason": "UNTRUSTED_PROVER: no active pinned correctness trust root for key_id='rogue-prover-v1'", "ts": "2026-11-01T21:50:12.097750Z"}}

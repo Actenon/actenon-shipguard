@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pinned dependencies + package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+          npm install -g tsx
+
+      - name: Diagnostics
+        run: actenon-shipguard doctor
+
+      - name: Adversarial trust-boundary tests
+        run: pytest -q
+
+      - name: Deterministic offline demo (reduced trials for CI)
+        run: actenon-shipguard demo --out /tmp/sg-demo --trials 20000
+
+      - name: Confirm demo verdict
+        run: test -f /tmp/sg-demo/demo-summary.json && grep -q '"decision": "ALLOW"' /tmp/sg-demo/demo-summary.json
