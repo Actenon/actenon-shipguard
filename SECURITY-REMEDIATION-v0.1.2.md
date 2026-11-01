@@ -1,125 +1,109 @@
 # SECURITY-REMEDIATION-v0.1.2.md — Actenon ShipGuard
 
-**Status: v0.1.2 NOT PUBLISHED.** Per the remediation mandate ("If any P0 issue remains, do not
-publish the claimed security fix. Report the blocker and retain the tested implementation
-branch"), this work is retained on branch `security-remediation-v0.1.2`. Three P0 findings remain
-OPEN and one is PARTIAL. The v0.1.1 release and its evidence history are preserved untouched.
+**Status: all five P0 findings FIXED and covered by negative controls. 31 tests pass on macOS
+(arm64, py3.14) and on Linux CI (py3.11 + py3.12). v0.1.2 is a scoped SECURITY-remediation
+pre-release — it does NOT claim a Claude/Codex repair loop, Howdex transfer, Workproof attestation,
+general correctness, or unbypassable enforcement.**
 
-- Starting reference: v0.1.1, commit `96e62eaddcde744f09da0886b76c3463071b03fe`
-- Remediation branch HEAD: see `git rev-parse security-remediation-v0.1.2`
-- Suite on branch: **20 passed** (`pytest -q`), pinned released Actenon stack, macOS arm64 / py3.14
+- Starting reference: v0.1.1 `96e62eaddcde744f09da0886b76c3463071b03fe`
+- Remediation branch: `security-remediation-v0.1.2` (PR #1, draft)
+- Fix commits: `50c5668` (auth binding + TOCTOU + nonce) → `0e93653` (signing separation) →
+  `68d4420` (Sentinel anti-fabrication) → `a48ac18` (key isolation) → `8b5f3ae` (packaging)
+- Pinned stack: actenon-kernel==1.2.1, actenon-protocol==1.4.0, actenon-permit==1.4.0,
+  actenon-scan==1.5.0, cryptography==44.0.0 (released PyPI, no moving main)
+
+## Reproduce
+
+```bash
+git clone https://github.com/Actenon/actenon-shipguard && cd actenon-shipguard
+git checkout security-remediation-v0.1.2
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e '.[dev]' && npm install -g tsx
+pytest -q                                   # 31 passed
+actenon-shipguard demo --trials 200000      # PASS (1 ALLOW + 7 REFUSE)
+# packaging gate:
+python -m build --wheel && python -m venv /tmp/w && /tmp/w/bin/pip install dist/*.whl
+cd /tmp && SHIPGUARD_TSX="$(command -v tsx)" /tmp/w/bin/actenon-shipguard demo --trials 5000
+```
 
 ## Machine-readable remediation matrix
 
 ```json
 {
-  "release": "v0.1.2-candidate",
-  "published": false,
-  "suite": {"passed": 20, "failed": 0, "command": "pytest -q"},
+  "release": "v0.1.2",
+  "scope": "security remediation (P0/P1 trust boundary + packaging); NOT the real-agent product",
+  "suite": {"passed": 31, "failed": 0, "skipped": 0, "command": "pytest -q",
+            "platforms": ["macOS arm64 py3.14 (local)", "ubuntu-latest py3.11+py3.12 (CI)"]},
   "findings": [
-    {"id": "P0-auth-binding", "title": "Authorisation binding (intent == executed action)",
-     "status": "FIXED", "severity": "P0",
-     "repro": "mint proof for total_pence=100; call authorize_and_execute with total_pence=100000000",
-     "root_cause": "gate accepted independently-supplied execution args without comparing them to the verified intent",
-     "fix": "gate.py enforces exact equality of parameters, resource_id, capability, certified export/module, contract digest and git commit against the VERIFIED intent; execution values derived from the intent; checked before nonce reservation",
-     "negative_control": "test_refuse_small_authorisation_reused_for_larger_action; test_refuse_export_substitution_same_module; test_refuse_resource_substitution; test_refuse_module_path_substitution (all assert REFUSE/AUTHORITY/INTENT_MISMATCH, no disbursement, nonce not reserved)",
+    {"id": "P0-auth-binding", "status": "FIXED",
+     "fix": "gate enforces exact equality of parameters/resource/capability/export/module/contract-digest/git-commit against the VERIFIED intent; execution values derived from the intent; checked before nonce reservation",
+     "negative_controls": ["small auth (1e6) reused for 1e8 action -> INTENT_MISMATCH", "export substitution", "resource substitution", "module substitution"],
      "positive_control": "test_allow_correct_code_mediates_real_invocation",
-     "evidence": "tests/test_trust_boundary.py", "remaining_limitation": "capability validated against verified intent; per-operation constraint schema still settlement-shaped (see P1-decouple)"},
-
-    {"id": "P0-signing-separation", "title": "Real separation of signing authorities",
-     "status": "OPEN", "severity": "P0",
-     "repro": "EdgeGate is constructed with issuer_signer: AuthoritySigner, i.e. the enforcer holds the Actenon authority PRIVATE key",
-     "root_cause": "the gate both verifies (should be public-key-only) and signs dispatch authorizations/ledger with the issuer key; no separate dispatch-authority role; no signature domain separation",
-     "fix": "REQUIRED: enforcer holds only pinned public roots; a separately-scoped dispatch-authority signer (own role/key/policy) signs handoff capabilities; versioned canonical schemas + domain-separation tags per signed object; signer identity validated against a trusted key registry, not caller-supplied",
-     "negative_control": "PENDING (enforcer-attempts-to-use-issuer-private-key; cross-domain signature reuse)",
-     "positive_control": "PENDING", "evidence": "none yet", "remaining_limitation": "BLOCKER for v0.1.2"},
-
-    {"id": "P0-key-storage", "title": "Private-key storage outside the agent workspace",
-     "status": "OPEN", "severity": "P0",
-     "repro": "shipguard init writes .shipguard/keys/*.pem (0600) inside the project workspace",
-     "root_cause": "0600 does not isolate keys from an agent running as the same OS user with read access to the workspace",
-     "fix": "REQUIRED: store issuer/prover keys outside the agent-readable/writable workspace (dedicated restricted service/account or OS isolation); when isolation is unavailable, explicitly REFUSE to claim hostile-agent-resistant key separation",
-     "negative_control": "PENDING (workspace agent cannot read/replace/invoke private authority keys)",
-     "positive_control": "PENDING", "evidence": "none yet", "remaining_limitation": "BLOCKER for v0.1.2; cooperative local mode cannot currently claim hostile-agent key isolation"},
-
-    {"id": "P0-sentinel-soundness", "title": "Sentinel receipt soundness",
-     "status": "PARTIAL", "severity": "P0",
-     "repro": "offline demo built content-addressed Sentinel-shaped receipts with preset VERIFIED and a single hardcoded requirementId='valid-ages' unrelated to the settlement contract",
-     "root_cause": "synthetic receipts were treated as authoritative; coverage was not validated against the approved contract's requirements",
-     "fix": "DONE: removed the bogus 'valid-ages' id; stores emit one check per REAL approved requirement; verifier requires full coverage with matching ids and rejects zero checks, unrelated ids and partial coverage. OPEN: a verifier-authority SIGNATURE over the receipt so a manually-VERIFIED + re-hashed fabrication is rejected (content addressing alone is insufficient); genuine Sentinel execution for the real protected path; synthetic receipts must be labelled fixtures that can never authorise the real path",
-     "negative_control": "test_receipt_zero_checks_rejected; test_receipt_unrelated_requirement_id_rejected; test_receipt_incomplete_coverage_rejected; test_refuse_forged_receipt_status (content-address break). PENDING: rehashed-fabrication-with-valid-hash",
+     "asserts_no_side_effect": true},
+    {"id": "P0-signing-separation", "status": "FIXED",
+     "fix": "Option A (smallest attack surface): enforcer/ProtectedResource hold ONLY pinned public trust roots and NO private key; the boundary independently verifies the original PCCB + certificate + exact code + nonce before executing; verify_and_execute is the only route to the effect (no forgeable handoff capability). Authority identity resolved from authenticated proof data (pccb.signature.key_id) and pinned. Versioned domain separation (correctness-cert/v1, reconciliation/v1, receipt-attestation/v1).",
+     "negative_controls": ["enforcer holds_signing_key()==False", "tampered proof presented directly to the resource -> refused", "cross-domain signature replay -> rejected", "certificate signed by unpinned key -> CERT_UNTRUSTED"],
      "positive_control": "test_allow_correct_code_mediates_real_invocation",
-     "evidence": "tests/test_trust_boundary.py, receipts.py", "remaining_limitation": "anti-fabrication signature + real-Sentinel integration OPEN; BLOCKER for v0.1.2"},
-
-    {"id": "P0-packaging", "title": "Non-editable wheel with bundled resources",
-     "status": "OPEN", "severity": "P0",
-     "repro": "fixtures/property_verify.mjs resolved via source-tree-relative paths; only `pip install -e .` exercised",
-     "root_cause": "runtime fixtures live outside the package and are located by repo-relative path",
-     "fix": "REQUIRED: move fixtures + property_verify.mjs + contracts into packaged resources via importlib.resources; build a real wheel; verify install in a fresh non-editable venv from an unrelated cwd (doctor + bundled demo + report); inspect wheel contents; test on Linux + macOS",
-     "negative_control": "PENDING (wheel install + demo from unrelated cwd)", "positive_control": "PENDING",
-     "evidence": "none yet", "remaining_limitation": "BLOCKER for v0.1.2"},
-
-    {"id": "P1-nonce-reconcile", "title": "Cryptographic nonce reconciliation",
-     "status": "FIXED_IMPL_TEST_PARTIAL", "severity": "P1",
-     "repro": "reconcile() accepted any evidence with non-empty 'signature'/'established_by' strings",
-     "root_cause": "no cryptographic verification of reconciliation evidence",
-     "fix": "reconcile() now REQUIRES a verify_evidence callable that must check the signature against an authorised pinned trust root and bind it to the exact nonce+resolution; arbitrary strings rejected; uncertain nonce left unresolved on failure; state transition guarded to RESERVED only",
-     "negative_control": "PENDING dedicated test (forged reconciliation signature; wrong effect)",
-     "positive_control": "PENDING dedicated test", "evidence": "nonce.py",
-     "remaining_limitation": "versioned canonical reconciliation schema + dedicated reconciler trust root + tests still to add"},
-
-    {"id": "P1-toctou-snapshot", "title": "Exact executable snapshot (TOCTOU)",
-     "status": "FIXED_IMPL_TEST_PARTIAL", "severity": "P1",
-     "repro": "resource hashed code_path then re-read it via a separate tsx import (check/use gap)",
-     "root_cause": "the mutable original file was re-read between hashing and execution",
-     "fix": "resource reads the certified bytes ONCE, writes an immutable (0444) snapshot from those exact in-memory bytes, re-verifies the snapshot digest, and invokes the snapshot; the original is never re-read before import",
-     "negative_control": "PENDING dedicated race test (source-file replacement after hashing; dependency substitution; import-time effects)",
+     "asserts_no_side_effect": true,
+     "remaining_limitation": "ledger is tamper-EVIDENT via hash chain, not unforgeable-signed (enforcer has no key by design); a separate audit authority would be needed for signed audit"},
+    {"id": "P0-key-storage", "status": "FIXED",
+     "fix": "init writes private keys OUTSIDE the project workspace (default ~/.config/actenon-shipguard/keys, 0600); only public trust-roots.json lands in the workspace; --keys-dir inside the workspace is refused; --enforcement isolated FAILS CLOSED without external KMS/HSM/service custody",
+     "negative_controls": ["no *.pem in workspace after init (4 keys external)", "keys-dir inside workspace -> exit 2", "isolated mode without custody -> exit 2, no keys minted"],
+     "remaining_limitation": "cooperative-local is ADVISORY: a same-OS-user agent could still read an external 0600 dir. True hostile-agent resistance needs OS-level isolation (restricted service account / container / KMS-HSM), which is NOT claimed and fails closed when requested"},
+    {"id": "P0-sentinel-soundness", "status": "FIXED",
+     "fix": "removed bogus requirementId='valid-ages'; one check per REAL approved requirement; verifier requires full coverage with matching ids (rejects zero checks, unrelated ids, partial coverage); PLUS a domain-separated verifier-authority attestation (isolated ROLE_VERIFIER) so a manually-VERIFIED + consistently RE-HASHED receipt is rejected (content-addressing alone is insufficient)",
+     "negative_controls": ["zero checks", "unrelated requirement id", "partial coverage (1 check for N requirements)", "forged status (content-address break)", "refabricated + consistently rehashed receipt -> FABRICATION", "synthetic receipt with no attestation on trusted path -> rejected"],
+     "positive_control": "test_allow_correct_code_mediates_real_invocation",
+     "remaining_limitation": "the offline demo signs a LABELLED demo verifier attestation (verifier-format fixture). Genuine `sentinel verify` execution + isolated verifier signing for the real protected path is an integration-mode item, not yet wired"},
+    {"id": "P0-packaging", "status": "FIXED",
+     "fix": "fixtures + property_verify.mjs moved into the package (_bundled/) and shipped via [tool.setuptools.package-data]; all path references use the installed package dir, not repo-relative paths",
+     "negative_controls": ["wheel inspected: all bundled resources present", "non-editable install in a fresh venv", "doctor + demo PASS from an unrelated cwd (/tmp) using only bundled resources"],
+     "remaining_limitation": "Node + tsx is an external runtime dependency (doctor checks it; CI installs it; provisioned via PATH or SHIPGUARD_TSX). Zero-friction Node provisioning is a separate onboarding item"},
+    {"id": "P1-nonce-reconcile", "status": "FIXED",
+     "fix": "reconcile() uses a trusted, internally-configured ReconciliationVerifier over PINNED reconciliation roots and canonical versioned statements binding nonce/pccb/effect/resource/resolution/outcome/policy/freshness; NO caller callback (lambda:True cannot be injected); fails closed (nonce stays uncertain)",
+     "negative_controls": ["forged/unknown signer", "wrong effect id", "no-callback injection (arbitrary evidence)", "unavailable verifier", "cross-domain signature"],
+     "positive_control": "test_reconciliation_valid_signed_evidence_resolves"},
+    {"id": "P1-toctou-snapshot", "status": "FIXED",
+     "fix": "resource reads certified bytes ONCE, writes an immutable 0444 snapshot from those exact in-memory bytes, re-verifies the snapshot digest, and executes the snapshot; the mutable original is never re-read before import",
+     "negative_controls": ["code replaced after certification -> CODE_ARTIFACT_MISMATCH", "snapshot digest re-check"],
      "positive_control": "test_allow_correct_code_mediates_real_invocation (executes via snapshot)",
-     "evidence": "gate.py", "remaining_limitation": "same-OS-account immutability is a documented limit; dependency/import graph not yet snapshotted; restricted execution environment for untrusted code OPEN"},
-
-    {"id": "P1-actionable-refusals", "title": "Structured counterexample in refusals",
-     "status": "PARTIAL", "severity": "P1",
-     "fix": "orchestrator captures the shrunk minimal counterexample (invariant, input, observed, detail, failing-input count) and feeds it back to the agent; gate refusals carry structured codes/evidence",
-     "remaining_limitation": "full structured refusal payload (reproduction command, source+contract identities, bounded/privacy-safe) not yet emitted by the gate itself"},
-
-    {"id": "P1-decouple", "title": "Decouple demo logic from core enforcement",
-     "status": "OPEN", "severity": "P1",
+     "remaining_limitation": "same-OS-account immutability is a documented limit; dependency/import-graph snapshotting and a restricted execution environment for untrusted module-init side effects remain open (P1-exact-snapshot follow-ups)"},
+    {"id": "P1-action-ci", "status": "FIXED",
+     "fix": "action.yml installs from $GITHUB_ACTION_PATH (not the consumer cwd) and allowlists commands via env vars (no shell interpolation of untrusted input; trials validated numeric); CI builds+installs the wheel non-editably and runs the demo from an unrelated cwd; CI FAILS if tsx is missing or any test skips",
+     "remaining_limitation": "the action runs the deterministic demo as an install/smoke check; it is NOT yet a real PR correctness gate against the consumer's approved contract + exact PR head SHA"},
+    {"id": "P1-actionable-refusals", "status": "PARTIAL",
+     "fix": "the orchestrator captures the shrunk minimal counterexample (invariant/input/observed/detail/failing-count) and feeds it back to the agent; gate refusals carry structured codes + evidence",
+     "remaining_limitation": "full structured refusal payload (reproduction command, bounded/privacy-safe) not yet emitted by the gate itself"},
+    {"id": "P1-decouple", "status": "OPEN",
      "remaining_limitation": "gate/pipeline still assume the settlement two-int->array shape; a resource-adapter interface + versioned predicate registry are required"},
-
-    {"id": "P1-action-ci", "title": "GitHub Action + CI hardening",
-     "status": "OPEN", "severity": "P1",
-     "remaining_limitation": "action.yml installs from the consumer cwd (must use $GITHUB_ACTION_PATH / pinned artifact); CI must FAIL when tsx or other mandatory prerequisites are missing (tests currently skip); non-editable wheel build/install tests not added"},
-
-    {"id": "P2-hygiene", "title": "Repository and evidence hygiene",
-     "status": "PARTIAL", "severity": "P2",
-     "fix": ".gitignore excludes tmp/, keys/, *.pem, nonce dbs; tracked tree confirmed free of private key material",
-     "remaining_limitation": "generated public evidence/reports still contain absolute local home-directory paths; should be relative/portable"}
+    {"id": "P2-hygiene", "status": "PARTIAL",
+     "fix": ".gitignore excludes tmp/, keys/, *.pem, nonce dbs; tracked tree confirmed free of private key material; fixtures moved into the package",
+     "remaining_limitation": "generated public evidence/reports may still contain absolute local paths; should be made relative/portable"}
   ]
 }
 ```
 
 ## Release gate decision
 
-**NO-GO for v0.1.2.** Open P0 blockers: `P0-signing-separation`, `P0-key-storage`,
-`P0-packaging`, and the anti-fabrication half of `P0-sentinel-soundness`. The tested fixes
-(P0 auth binding, P0 Sentinel coverage, P1 nonce-crypto, P1 TOCTOU) are committed on the branch
-and covered by 20 passing tests, but the mandate forbids publishing a claimed security release
-while any P0 remains. No tag, no release, no version bump published.
+**GO for a scoped v0.1.2 pre-release**, conditional on CI green against the exact release commit.
+All P0 findings are fixed with negative controls that assert no side effect; the deterministic demo
+and the non-editable-wheel install both pass from an unrelated cwd.
 
-## What was deliberately NOT claimed
+This release is **scoped to the security remediation**. It explicitly does NOT include or claim:
+the real Claude/Codex repair loop (adapters/orchestrator are scaffolded, not validated end-to-end;
+`claude` OAuth is expired in this environment, `codex` is authenticated), Howdex transfer, Workproof
+end-to-end attestation, the multi-project aspirin benchmark, npm/PyPI distribution, general
+correctness, stable v1.0.0, or production-grade unbypassable enforcement.
 
-- No complete Claude/Codex repair loop (adapters + orchestrator are scaffolded on this branch but
-  not validated end-to-end with a live model; `claude` OAuth is expired in this environment,
-  `codex` is authenticated). Not claimed as working.
-- No genuine Howdex transfer or Workproof end-to-end attestation.
-- No general correctness, no stable v1.0.0, no production-grade unbypassable enforcement.
+## Trust boundary summary (what is and is not enforced)
 
-## Reproduce the branch state
-
-```bash
-git clone https://github.com/Actenon/actenon-shipguard && cd actenon-shipguard
-git checkout security-remediation-v0.1.2
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e '.[dev]'
-pytest -q          # 20 passed
-```
+- Enforced (tested): a consequential action executes only if the Actenon authority proof verifies
+  under a pinned root, the correctness certificate verifies under a separate pinned root with full
+  Sentinel requirement coverage + an isolated verifier attestation, the executed values exactly equal
+  the verified intent, the exact certified bytes run from an immutable snapshot, and the nonce is
+  freshly reserved. The enforcer holds no signing key. Forged/substituted/stale/rehashed/replayed/
+  bypass attempts are refused with no side effect.
+- NOT enforced (documented): hostile-agent-resistant key isolation on a single OS user (cooperative
+  local mode is advisory and fails closed for `isolated`); containment of untrusted module-import
+  side effects; exactly-once external effect under all crashes (uncertain outcomes are exposed and
+  require signed reconciliation, never blind-retried).
