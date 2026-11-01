@@ -59,7 +59,9 @@ def build_offline_sentinel_store(store: Path, repo: Path, contract: dict, head: 
                "objective": contract.get("objective", ""), "baselineHash": candidate_hash,
                "candidateHash": candidate_hash, "contractHash": contract_hash, "git": snapshot["git"],
                "runner": "local-advisory", "runtime": {"verifierVersion": "1.0.0", "workerSha256": "w" * 64, "node": "v22"},
-               "checks": [{"id": "req-1", "label": "behaviour", "status": check_status, "detail": "", "requirementId": "valid-ages"}],
+               "checks": [{"id": f"check-{r['id']}", "label": str(r.get("description", r["id"]))[:60],
+                           "status": check_status, "detail": "", "requirementId": r["id"]}
+                          for r in contract.get("requirements", [])],
                "changes": [], "status": status, "durationMs": 1, "limitations": [], "nextActions": []}
     rh = _put_object(store, json.dumps(receipt, sort_keys=True).encode())
     (store / "latest-verification.json").write_text(json.dumps({"schemaVersion": 1, "receipt": rh, "report": ""}))

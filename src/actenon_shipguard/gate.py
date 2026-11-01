@@ -211,6 +211,11 @@ class EdgeGate:
             mismatches.append(f"export {export!r} != certified {cert.body['code_artifact']['export']!r}")
         if module_path != cert.body["code_artifact"]["module"]:
             mismatches.append(f"module {module_path!r} != certified {cert.body['code_artifact']['module']!r}")
+        # items 4-5: the proof-bound contract digest and git commit must equal the certificate's.
+        if constraints.get("contract", "").replace("sha256:", "") != cert.body.get("contract_digest"):
+            mismatches.append("proof-bound contract digest != certificate contract digest")
+        if constraints.get("git_head") != cert.body.get("git_head"):
+            mismatches.append("proof-bound git commit != certificate git commit")
         if mismatches:
             d = GateDecision(REFUSE, "AUTHORITY", "INTENT_MISMATCH",
                              "executed action does not equal the verified authorised intent: " + "; ".join(mismatches),

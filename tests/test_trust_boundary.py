@@ -57,7 +57,7 @@ def put_object(store: Path, payload: bytes) -> str:
 # --------------------------------------------------------------------------- #
 def build_sentinel_store(store: Path, repo: Path, contract: dict, *, status="VERIFIED",
                          check_status="VERIFIED", head: str | None = None,
-                         contract_override: dict | None = None) -> str:
+                         contract_override: dict | None = None, checks_override=None) -> str:
     store = Path(store); store.mkdir(parents=True, exist_ok=True)
     src = (repo / MODULE).read_bytes()
     file_hash = put_object(store, src)
@@ -67,7 +67,10 @@ def build_sentinel_store(store: Path, repo: Path, contract: dict, *, status="VER
     candidate_hash = put_object(store, json.dumps(snapshot, sort_keys=True).encode())
     stored_contract = contract_override if contract_override is not None else contract
     contract_hash = put_object(store, json.dumps(stored_contract, sort_keys=True).encode())
-    checks = [{"id": "req-1", "label": "behaviour", "status": check_status, "detail": "", "requirementId": "valid-ages"}]
+    checks = checks_override if checks_override is not None else [
+        {"id": f"check-{r['id']}", "label": str(r.get("description", r["id"]))[:60],
+         "status": check_status, "detail": "", "requirementId": r["id"]}
+        for r in contract.get("requirements", [])]
     receipt = {"schemaVersion": 1, "id": str(uuid.uuid4()), "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                "objective": contract.get("objective", ""), "baselineHash": candidate_hash, "candidateHash": candidate_hash,
                "contractHash": contract_hash, "git": snapshot["git"], "runner": "local-advisory",
@@ -318,3 +321,93 @@ def test_authority_proof_tamper_refused(tmp_path, trust, contract):
     gate, *_ = make_gate(tmp_path, a)
     d = run_gate(gate, a)
     assert d.decision == "REFUSE" and d.layer == "AUTHORITY", d  # action_hash no longer matches signature
+
+
+# --------------------------------------------------------------------------- #
+# P0 authorisation binding: executed action must EXACTLY equal the verified intent
+# --------------------------------------------------------------------------- #
+def _exec_with(gate, a, *, parameters=None, export=EXPORT, module_path=MODULE,
+               resource_id="ledger-1", code_path=None):
+    return gate.authorize_and_execute(
+        intent_payload=a["intent"], pccb_payload=a["pccb"], cert=a["cert"],
+        code_path=code_path or a["code"], module_path=module_path, export=export,
+        parameters=parameters or {"total_pence": 1000000, "parties": 3, "allocation_id": "alloc-1"},
+        resource_id=resource_id, now=a["now"])
+
+
+def test_refuse_small_authorisation_reused_for_larger_action(tmp_path, trust, contract):
+    # A valid proof authorises total_pence=1_000_000; the caller requests 100_000_000.
+    a = make_action(tmp_path, trust, contract, ARM_B)
+    gate, nonces, resource, out = make_gate(tmp_path, a)
+    d = _exec_with(gate, a, parameters={"total_pence": 100000000, "parties": 3, "allocation_id": "alloc-1"})
+    assert d.decision == "REFUSE" and d.layer == "AUTHORITY" and d.code == "INTENT_MISMATCH", d
+    assert not (out / "disbursement.json").exists()      # protected resource NEVER invoked
+    assert nonces.get(a["pccb"]["nonce"]) is None        # refused BEFORE nonce reservation / side effect
+
+
+def test_refuse_export_substitution_same_module(tmp_path, trust, contract):
+    # Certificate certifies export `allocate`; caller tries to execute a different export.
+    a = make_action(tmp_path, trust, contract, ARM_B)
+    gate, nonces, resource, out = make_gate(tmp_path, a)
+    d = _exec_with(gate, a, export="formatPence")
+    assert d.decision == "REFUSE" and d.code == "INTENT_MISMATCH", d
+    assert not (out / "disbursement.json").exists()
+    assert nonces.get(a["pccb"]["nonce"]) is None
+
+
+def test_refuse_resource_substitution(tmp_path, trust, contract):
+    a = make_action(tmp_path, trust, contract, ARM_B)
+    gate, nonces, resource, out = make_gate(tmp_path, a)
+    d = _exec_with(gate, a, resource_id="attacker-controlled-ledger")
+    assert d.decision == "REFUSE" and d.code == "INTENT_MISMATCH", d
+    assert not (out / "disbursement.json").exists()
+    assert nonces.get(a["pccb"]["nonce"]) is None
+
+
+def test_refuse_module_path_substitution(tmp_path, trust, contract):
+    a = make_action(tmp_path, trust, contract, ARM_B)
+    gate, nonces, resource, out = make_gate(tmp_path, a)
+    d = _exec_with(gate, a, module_path="src/other.ts")
+    assert d.decision == "REFUSE" and d.code == "INTENT_MISMATCH", d
+    assert not (out / "disbursement.json").exists()
+
+
+# --------------------------------------------------------------------------- #
+# P0 Sentinel receipt soundness: coverage, matching ids, no fabricated VERIFIED
+# --------------------------------------------------------------------------- #
+def test_receipt_zero_checks_rejected(tmp_path, contract):
+    repo = _git_init_candidate(tmp_path, ARM_B, contract)
+    head = _git_head(repo)
+    store = tmp_path / "store-zero"
+    build_sentinel_store(store, repo, contract, head=head, checks_override=[])
+    rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
+                                 candidate_repo=repo, module_path=MODULE, expected_head=head)
+    assert not rv.ok and any("zero checks" in r for r in rv.reasons), rv.reasons
+
+
+def test_receipt_unrelated_requirement_id_rejected(tmp_path, contract):
+    repo = _git_init_candidate(tmp_path, ARM_B, contract)
+    head = _git_head(repo)
+    store = tmp_path / "store-unrelated"
+    checks = [{"id": f"check-{r['id']}", "label": "x", "status": "VERIFIED", "detail": "", "requirementId": r["id"]}
+              for r in contract.get("requirements", [])]
+    checks.append({"id": "rogue", "label": "x", "status": "VERIFIED", "detail": "", "requirementId": "not-a-real-requirement"})
+    build_sentinel_store(store, repo, contract, head=head, checks_override=checks)
+    rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
+                                 candidate_repo=repo, module_path=MODULE, expected_head=head)
+    assert not rv.ok and any("not in the approved contract" in r for r in rv.reasons), rv.reasons
+
+
+def test_receipt_incomplete_coverage_rejected(tmp_path, contract):
+    reqs = contract.get("requirements", [])
+    if len(reqs) < 2:
+        pytest.skip("fixture contract needs >=2 requirements to test partial coverage")
+    repo = _git_init_candidate(tmp_path, ARM_B, contract)
+    head = _git_head(repo)
+    store = tmp_path / "store-partial"
+    # A single VERIFIED check for ONE requirement must not satisfy the whole contract.
+    one = [{"id": "check-x", "label": "x", "status": "VERIFIED", "detail": "", "requirementId": reqs[0]["id"]}]
+    build_sentinel_store(store, repo, contract, head=head, checks_override=one)
+    rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
+                                 candidate_repo=repo, module_path=MODULE, expected_head=head)
+    assert not rv.ok and any("no VERIFIED matching check" in r for r in rv.reasons), rv.reasons

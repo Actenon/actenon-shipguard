@@ -156,6 +156,27 @@ def verify_sentinel_receipt(
             except Exception as e:
                 res.reject(f"CONTRACT: unreadable contract ({e})")
 
+    # 5b. Requirement coverage: every approved requirement must be represented by a qualifying
+    #     check with a MATCHING requirement id. One unrelated VERIFIED check cannot satisfy a
+    #     multi-requirement contract; zero checks cannot qualify; substituted/duplicated ids rejected.
+    try:
+        approved_reqs = [r["id"] for r in json.loads(Path(approved_contract).read_text()).get("requirements", [])]
+    except Exception as e:
+        return res.reject(f"CONTRACT: unreadable approved contract ({e})")
+    all_checks = receipt.get("checks") or []
+    if not all_checks:
+        res.reject("COVERAGE: receipt has zero checks — cannot satisfy any approved requirement")
+    else:
+        check_req_ids = [c.get("requirementId") for c in all_checks if c.get("requirementId")]
+        unrelated = sorted({rid for rid in check_req_ids if rid not in approved_reqs})
+        if unrelated:
+            res.reject(f"COVERAGE: check requirement id(s) not in the approved contract: {unrelated[:6]}")
+        verified_covering = {c.get("requirementId") for c in all_checks
+                             if c.get("status") == VERIFIED and c.get("requirementId") in approved_reqs}
+        missing = [rid for rid in approved_reqs if rid not in verified_covering]
+        if missing:
+            res.reject(f"COVERAGE: approved requirement(s) with no VERIFIED matching check: {missing[:6]}")
+
     # 6. Source identity + freshness: the snapshot's recorded hash for the module must
     #    equal sha256 of the bytes that will ACTUALLY execute now.
     if not res.candidate_hash:
