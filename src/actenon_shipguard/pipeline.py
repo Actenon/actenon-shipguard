@@ -46,8 +46,13 @@ def _put_object(store: Path, payload: bytes) -> str:
 
 
 def build_offline_sentinel_store(store: Path, repo: Path, contract: dict, head: str,
-                                 *, status="VERIFIED", check_status="VERIFIED") -> str:
-    """Faithful content-addressed Sentinel store (object key == sha256 of stored bytes)."""
+                                 *, status="VERIFIED", check_status="VERIFIED", verifier_kp=None) -> str:
+    """Faithful content-addressed Sentinel store (object key == sha256 of stored bytes).
+
+    LABELLED OFFLINE FIXTURE: when ``verifier_kp`` is supplied the receipt carries a demo
+    verifier-authority attestation so the anti-fabrication path is exercised deterministically;
+    this is a verifier-format fixture, NOT a genuine Sentinel run (see RELEASE-EVIDENCE.md).
+    """
     store.mkdir(parents=True, exist_ok=True)
     src = (repo / MODULE).read_bytes()
     file_hash = _put_object(store, src)
@@ -63,6 +68,9 @@ def build_offline_sentinel_store(store: Path, repo: Path, contract: dict, head: 
                            "status": check_status, "detail": "", "requirementId": r["id"]}
                           for r in contract.get("requirements", [])],
                "changes": [], "status": status, "durationMs": 1, "limitations": [], "nextActions": []}
+    if verifier_kp is not None:
+        from .receipts import sign_receipt_attestation
+        receipt = sign_receipt_attestation(verifier_kp, receipt)
     rh = _put_object(store, json.dumps(receipt, sort_keys=True).encode())
     (store / "latest-verification.json").write_text(json.dumps({"schemaVersion": 1, "receipt": rh, "report": ""}))
     return rh
@@ -103,11 +111,12 @@ def _mint(tmp, roots, keypairs, contract, candidate, tsx, *, prover=None, status
     repo = _init_repo(tmp, candidate)
     head = _git_head(repo)
     store = tmp / f"store-{uuid.uuid4().hex[:6]}"
-    build_offline_sentinel_store(store, repo, contract, head, status=status, check_status=check_status)
+    build_offline_sentinel_store(store, repo, contract, head, status=status, check_status=check_status,
+                                 verifier_kp=keypairs["verifier"])
     contract_file = tmp / f"c-{uuid.uuid4().hex[:6]}.json"
     contract_file.write_text(json.dumps(contract, sort_keys=True))
     rv = verify_sentinel_receipt(store=store, approved_contract=contract_file, candidate_repo=repo,
-                                 module_path=MODULE, expected_head=head)
+                                 module_path=MODULE, expected_head=head, verifier_roots=roots)
     prop = run_property(tsx, code_for_exec or (repo / MODULE), FIXTURES / "contracts" / "property-contract.json", tmp, trials)
     cdig = sha256_hex(json.dumps(contract, sort_keys=True).encode())
     cert = build_certificate(prover=prover, code_path=repo / MODULE, module_path=MODULE, export=EXPORT,

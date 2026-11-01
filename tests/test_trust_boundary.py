@@ -25,6 +25,7 @@ from actenon_shipguard import (
 )
 from actenon_shipguard.certs import verify_certificate
 from actenon_shipguard.proofs import AuthorityVerifier
+from actenon_shipguard.receipts import sign_receipt_attestation
 from actenon_shipguard.cli import _find_tsx
 from actenon_shipguard.nonce import ReconciliationVerifier, sign_reconciliation_statement, RESERVED
 from actenon_shipguard.trust import (
@@ -61,7 +62,8 @@ def put_object(store: Path, payload: bytes) -> str:
 # --------------------------------------------------------------------------- #
 def build_sentinel_store(store: Path, repo: Path, contract: dict, *, status="VERIFIED",
                          check_status="VERIFIED", head: str | None = None,
-                         contract_override: dict | None = None, checks_override=None) -> str:
+                         contract_override: dict | None = None, checks_override=None,
+                         verifier_kp=None) -> str:
     store = Path(store); store.mkdir(parents=True, exist_ok=True)
     src = (repo / MODULE).read_bytes()
     file_hash = put_object(store, src)
@@ -80,6 +82,8 @@ def build_sentinel_store(store: Path, repo: Path, contract: dict, *, status="VER
                "contractHash": contract_hash, "git": snapshot["git"], "runner": "local-advisory",
                "runtime": {"verifierVersion": "1.0.0", "workerSha256": "w" * 64, "node": "v22"},
                "checks": checks, "changes": [], "status": status, "durationMs": 1, "limitations": [], "nextActions": []}
+    if verifier_kp is not None:
+        receipt = sign_receipt_attestation(verifier_kp, receipt)
     receipt_hash = put_object(store, json.dumps(receipt, sort_keys=True).encode())
     (store / "latest-verification.json").write_text(json.dumps({"schemaVersion": 1, "receipt": receipt_hash, "report": ""}))
     return receipt_hash
@@ -140,9 +144,11 @@ def make_action(tmp_path, trust, contract, candidate, *, status="VERIFIED", chec
     head = _git_head(repo)
     store = tmp_path / f"store-{uuid.uuid4().hex[:6]}"
     receipt_hash = build_sentinel_store(store, repo, contract, status=status, check_status=check_status,
-                                        head=head, contract_override=contract_override)
-    rv = verify_sentinel_receipt(store=store, approved_contract=json.dumps(contract) and _contract_file(tmp_path, contract),
-                                 candidate_repo=repo, module_path=MODULE, expected_head=head)
+                                        head=head, contract_override=contract_override,
+                                        verifier_kp=keypairs["verifier"])
+    rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
+                                 candidate_repo=repo, module_path=MODULE, expected_head=head,
+                                 verifier_roots=roots)
     prop = run_property(code_for_exec or (repo / MODULE), tmp_path)
     cert = build_certificate(prover=prover, code_path=repo / MODULE, module_path=MODULE, export=EXPORT,
                              property_report=prop, receipt=rv, contract_digest=sha(json.dumps(contract, sort_keys=True).encode()),
@@ -498,3 +504,44 @@ def test_cross_domain_signature_rejected(tmp_path, trust):
     sig = sign_domain(kp["correctness"], DOMAIN_CORRECTNESS_CERT, body)
     assert verify_domain(kp["correctness"].public_key, DOMAIN_CORRECTNESS_CERT, body, sig) is True
     assert verify_domain(kp["correctness"].public_key, DOMAIN_RECONCILIATION, body, sig) is False
+
+
+def test_refabricated_and_rehashed_receipt_rejected(tmp_path, trust, contract):
+    # Decisive anti-fabrication control: an attacker flips a CONTRADICTED receipt to VERIFIED and
+    # CONSISTENTLY REHASHES it (new object key + repointed latest-verification), which defeats
+    # content-addressing. Only the isolated verifier-authority attestation catches it, because the
+    # attacker cannot re-sign the altered content without the verifier private key.
+    roots, kp = trust
+    repo = _git_init_candidate(tmp_path, ARM_B, contract)
+    head = _git_head(repo)
+    store = tmp_path / "store-refab"
+    build_sentinel_store(store, repo, contract, status="CONTRADICTED", check_status="CONTRADICTED",
+                         head=head, verifier_kp=kp["verifier"])
+    latest = json.loads((store / "latest-verification.json").read_text())
+    orig = json.loads((store / "objects" / latest["receipt"]).read_text())
+    assert orig["status"] == "CONTRADICTED"
+    forged = dict(orig)
+    forged["status"] = "VERIFIED"
+    forged["checks"] = [{**c, "status": "VERIFIED"} for c in forged["checks"]]
+    # attacker keeps the ORIGINAL attestation (cannot forge one over the altered content)
+    forged_bytes = json.dumps(forged, sort_keys=True).encode()
+    new_key = sha(forged_bytes)
+    (store / "objects" / new_key).write_bytes(forged_bytes)  # content-address now consistent
+    (store / "latest-verification.json").write_text(json.dumps({"schemaVersion": 1, "receipt": new_key, "report": ""}))
+    rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
+                                 candidate_repo=repo, module_path=MODULE, expected_head=head,
+                                 verifier_roots=roots)
+    assert not rv.ok and any("FABRICATION" in r for r in rv.reasons), rv.reasons
+
+
+def test_receipt_without_attestation_rejected_on_trusted_path(tmp_path, trust, contract):
+    # A synthetic receipt with NO verifier attestation must not qualify when a verifier root is required.
+    roots, kp = trust
+    repo = _git_init_candidate(tmp_path, ARM_B, contract)
+    head = _git_head(repo)
+    store = tmp_path / "store-noatt"
+    build_sentinel_store(store, repo, contract, head=head)  # verifier_kp omitted -> no attestation
+    rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
+                                 candidate_repo=repo, module_path=MODULE, expected_head=head,
+                                 verifier_roots=roots)
+    assert not rv.ok and any("no verifier-authority attestation" in r for r in rv.reasons), rv.reasons

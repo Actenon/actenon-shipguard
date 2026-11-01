@@ -36,7 +36,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 ROLE_AUTHORITY = "authority"            # Actenon proof issuer (signs PCCBs)
 ROLE_CORRECTNESS = "correctness"        # correctness-certificate prover (signs certs)
 ROLE_RECONCILIATION = "reconciliation"  # operator authority (signs reconciliation evidence)
-KNOWN_ROLES = (ROLE_AUTHORITY, ROLE_CORRECTNESS, ROLE_RECONCILIATION)
+ROLE_VERIFIER = "verifier"              # isolated independent-verifier authority (attests receipts)
+KNOWN_ROLES = (ROLE_AUTHORITY, ROLE_CORRECTNESS, ROLE_RECONCILIATION, ROLE_VERIFIER)
 
 # Versioned signature domain separation: every signed object embeds its domain tag in the
 # canonicalised signed payload, and verifiers require an exact match, so a signature minted
@@ -45,6 +46,7 @@ KNOWN_ROLES = (ROLE_AUTHORITY, ROLE_CORRECTNESS, ROLE_RECONCILIATION)
 DOMAIN_CORRECTNESS_CERT = "shipguard/correctness-cert/v1"
 DOMAIN_RECONCILIATION = "shipguard/reconciliation/v1"
 DOMAIN_LEDGER = "shipguard/ledger/v1"
+DOMAIN_RECEIPT_ATTESTATION = "shipguard/receipt-attestation/v1"
 
 
 def b64u_encode(raw: bytes) -> str:
@@ -228,13 +230,15 @@ def generate_trust_roots(out_dir: Path, policy_revision: str = "1") -> tuple[Tru
     authority = KeyPair.generate(ROLE_AUTHORITY, "shipguard-authority-v1")
     correctness = KeyPair.generate(ROLE_CORRECTNESS, "shipguard-correctness-v1")
     reconciliation = KeyPair.generate(ROLE_RECONCILIATION, "shipguard-reconciliation-v1")
-    for kp in (authority, correctness, reconciliation):
+    verifier = KeyPair.generate(ROLE_VERIFIER, "shipguard-verifier-v1")
+    for kp in (authority, correctness, reconciliation, verifier):
         p = keys_dir / f"{kp.role}-{kp.key_id}.pem"
         p.write_bytes(kp.private_pem())
         os.chmod(p, 0o600)
-    roots = TrustRoots.from_keypairs([authority, correctness, reconciliation], policy_revision=policy_revision)
+    roots = TrustRoots.from_keypairs([authority, correctness, reconciliation, verifier], policy_revision=policy_revision)
     roots.write(out_dir / "trust-roots.json")
-    return roots, {"authority": authority, "correctness": correctness, "reconciliation": reconciliation}
+    return roots, {"authority": authority, "correctness": correctness,
+                   "reconciliation": reconciliation, "verifier": verifier}
 
 
 def sign_domain(keypair: KeyPair, domain: str, body: dict[str, Any]) -> str:
