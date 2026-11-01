@@ -211,21 +211,23 @@ class UntrustedKeyError(Exception):
     """Raised when a signer identity is not pinned, expired, or substituted."""
 
 
-def generate_trust_roots(out_dir: Path, policy_revision: str = "1") -> tuple[TrustRoots, dict[str, KeyPair]]:
-    """Bootstrap a separated trust boundary: authority, correctness and reconciliation keys.
+def generate_trust_roots(out_dir: Path, policy_revision: str = "1", *,
+                         keys_dir: Path | None = None) -> tuple[TrustRoots, dict[str, KeyPair]]:
+    """Bootstrap a separated trust boundary: authority, correctness, reconciliation, verifier keys.
 
-    Private keys are written to ``keys/`` (0600), held by the respective SEPARATE authorities —
-    never by the enforcer or the coding agent. The pinned PUBLIC trust roots go to
-    ``trust-roots.json``; only that file is needed to verify.
+    Only the PUBLIC ``trust-roots.json`` is written to ``out_dir`` (which may be the agent's project
+    workspace). The PRIVATE keys are written to ``keys_dir`` — pass a location OUTSIDE the agent's
+    readable/writable workspace so the coding agent never holds issuer/prover signing material.
 
-    DOCUMENTED LIMITATION (P0-key-storage): on a single unrestricted OS user, a 0600 directory
-    outside the workspace is NOT hostile-agent-resistant isolation — a same-user agent with read
-    access could still reach it. Cooperative local development only; the stronger
-    hostile-agent-resistant mode requires a restricted service account / container / KMS-HSM and
-    must fail closed when unavailable. See SECURITY-REMEDIATION-v0.1.2.md.
+    DOCUMENTED LIMITATION (P0-key-storage): on a single unrestricted OS user, an external 0600
+    directory is NOT hostile-agent-resistant isolation — a same-user agent with filesystem access
+    could still reach it. That is cooperative-local (advisory) mode. The stronger isolated mode
+    requires external custody (KMS/HSM or a restricted service account) and must fail closed when
+    unavailable; see cli.cmd_init and SECURITY-REMEDIATION-v0.1.2.md.
     """
     out_dir = Path(out_dir)
-    keys_dir = out_dir / "keys"
+    out_dir.mkdir(parents=True, exist_ok=True)  # public trust-roots location (may be the workspace)
+    keys_dir = Path(keys_dir) if keys_dir is not None else (out_dir / "keys")
     keys_dir.mkdir(parents=True, exist_ok=True)
     authority = KeyPair.generate(ROLE_AUTHORITY, "shipguard-authority-v1")
     correctness = KeyPair.generate(ROLE_CORRECTNESS, "shipguard-correctness-v1")

@@ -48,27 +48,54 @@ def _find_tsx(explicit: str | None) -> Path | None:
 def cmd_init(args) -> int:
     target = Path(args.dir).resolve()
     target.mkdir(parents=True, exist_ok=True)
-    roots, keypairs = generate_trust_roots(target / ".shipguard")
+    enforcement = args.enforcement
+
+    if enforcement == "isolated":
+        # FAIL CLOSED: hostile-agent-resistant isolation requires external key custody this build
+        # does not integrate. Never pretend a same-user 0600 directory is isolation.
+        custodian = os.environ.get("SHIPGUARD_KEY_CUSTODIAN")
+        if not custodian:
+            print("ERROR: --enforcement isolated requires external key custody "
+                  "(SHIPGUARD_KEY_CUSTODIAN=kms://…|hsm://…|service://…). A same-OS-user 0600 directory "
+                  "is NOT hostile-agent-resistant. Refusing to claim isolated mode without real custody.",
+                  file=sys.stderr)
+            return 2
+        print("ERROR: an external custodian is configured but this build has no KMS/HSM/service signer "
+              "integration yet, so isolated mode cannot be truthfully enforced. Use cooperative-local.",
+              file=sys.stderr)
+        return 2
+
+    # cooperative-local: private keys OUTSIDE the agent's project workspace, 0600 (advisory).
+    keys_dir = (Path(args.keys_dir).expanduser().resolve() if args.keys_dir
+                else Path.home() / ".config" / "actenon-shipguard" / "keys")
+    if str(keys_dir) == str(target) or str(keys_dir).startswith(str(target) + os.sep):
+        print(f"ERROR: --keys-dir must be OUTSIDE the project workspace {target} (got {keys_dir})", file=sys.stderr)
+        return 2
+
+    roots, keypairs = generate_trust_roots(target / ".shipguard", keys_dir=keys_dir)
     config = {
-        "schemaVersion": 1,
-        "product": "actenon-shipguard",
-        "version": __version__,
-        "trust_roots": ".shipguard/trust-roots.json",
+        "schemaVersion": 1, "product": "actenon-shipguard", "version": __version__,
+        "trust_roots": ".shipguard/trust-roots.json", "keys_dir": str(keys_dir),
         "authority_key_id": keypairs["authority"].key_id,
         "correctness_key_id": keypairs["correctness"].key_id,
+        "reconciliation_key_id": keypairs["reconciliation"].key_id,
+        "verifier_key_id": keypairs["verifier"].key_id,
         "enforcement": "cooperative-local",
-        "note": "Private keys are in .shipguard/keys (0600). Pin trust-roots.json outside the agent's writable scope in production.",
+        "enforcement_note": ("cooperative-local is ADVISORY: private keys live outside the project workspace "
+                             "(0600) but a same-OS-user agent could still reach them. Not hostile-agent-resistant; "
+                             "not an unbypassable sandbox. Isolated mode requires external KMS/HSM/service custody."),
     }
     (target / "shipguard.json").write_text(json.dumps(config, indent=2) + "\n")
+    pem_in_workspace = [str(p) for p in target.rglob("*.pem")]
     tr = target / ".shipguard" / "trust-roots.json"
-    ak = keypairs["authority"].key_id
-    ck = keypairs["correctness"].key_id
     print(f"initialised ShipGuard in {target}")
-    print(f"  trust roots : {tr}")
-    print(f"  authority   : Ed25519 {ak}")
-    print(f"  correctness : Ed25519 {ck}")
-    print("  enforcement : cooperative-local (not an unbypassable sandbox)")
-    return 0
+    print(f"  trust roots (public, in workspace) : {tr}")
+    print(f"  private keys (OUTSIDE workspace)   : {keys_dir}")
+    print(f"  authorities : authority={keypairs['authority'].key_id} correctness={keypairs['correctness'].key_id} "
+          f"reconciliation={keypairs['reconciliation'].key_id} verifier={keypairs['verifier'].key_id}")
+    print("  enforcement : cooperative-local (ADVISORY — not hostile-agent-resistant, not a sandbox)")
+    print(f"  private keys inside workspace: {pem_in_workspace or 'NONE (good)'}")
+    return 0 if not pem_in_workspace else 1
 
 
 def cmd_demo(args) -> int:
@@ -164,7 +191,12 @@ def main(argv=None) -> int:
     ap.add_argument("--version", action="version", version=f"actenon-shipguard {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("init", help="bootstrap pinned trust roots + config"); p.add_argument("--dir", default="."); p.set_defaults(fn=cmd_init)
+    p = sub.add_parser("init", help="bootstrap pinned trust roots + config"); p.add_argument("--dir", default=".")
+    p.add_argument("--enforcement", default="cooperative-local", choices=["cooperative-local", "isolated"],
+                   help="cooperative-local (advisory) or isolated (fails closed without external KMS/HSM custody)")
+    p.add_argument("--keys-dir", default=None,
+                   help="directory for PRIVATE keys; MUST be outside the project workspace (default: ~/.config/actenon-shipguard/keys)")
+    p.set_defaults(fn=cmd_init)
     p = sub.add_parser("demo", help="deterministic offline protected-execution demo")
     p.add_argument("--out", default=str(Path("evidence") / "shipguard-demo")); p.add_argument("--trials", type=int, default=200000)
     p.add_argument("--tsx", default=None); p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_demo)

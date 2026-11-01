@@ -545,3 +545,30 @@ def test_receipt_without_attestation_rejected_on_trusted_path(tmp_path, trust, c
                                  candidate_repo=repo, module_path=MODULE, expected_head=head,
                                  verifier_roots=roots)
     assert not rv.ok and any("no verifier-authority attestation" in r for r in rv.reasons), rv.reasons
+
+
+# --------------------------------------------------------------------------- #
+# P0 key-storage isolation: no private signing material in the agent workspace
+# --------------------------------------------------------------------------- #
+def test_init_keeps_private_keys_out_of_workspace(tmp_path):
+    from actenon_shipguard.cli import main
+    proj = tmp_path / "project"
+    keys = tmp_path / "external-keys"  # OUTSIDE the project workspace
+    assert main(["init", "--dir", str(proj), "--keys-dir", str(keys)]) == 0
+    assert (proj / ".shipguard" / "trust-roots.json").exists()   # public roots in workspace
+    assert list(proj.rglob("*.pem")) == []                        # NO private key in the workspace
+    assert len(list(keys.glob("*.pem"))) == 4                     # authority/correctness/reconciliation/verifier
+
+
+def test_init_refuses_keys_dir_inside_workspace(tmp_path):
+    from actenon_shipguard.cli import main
+    proj = tmp_path / "project"; proj.mkdir()
+    assert main(["init", "--dir", str(proj), "--keys-dir", str(proj / "keys")]) == 2
+
+
+def test_init_isolated_mode_fails_closed_without_custody(tmp_path, monkeypatch):
+    from actenon_shipguard.cli import main
+    monkeypatch.delenv("SHIPGUARD_KEY_CUSTODIAN", raising=False)
+    proj = tmp_path / "project-iso"
+    assert main(["init", "--dir", str(proj), "--enforcement", "isolated"]) == 2  # fails closed
+    assert list(proj.rglob("*.pem")) == []  # no keys minted when refusing the stronger mode
