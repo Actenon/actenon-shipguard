@@ -32,11 +32,13 @@ from actenon_shipguard.trust import (
     sign_domain, verify_domain, DOMAIN_CORRECTNESS_CERT, DOMAIN_RECONCILIATION,
 )
 
-PKG = Path(__file__).resolve().parents[1]
-FIXTURES = PKG / "fixtures"
+import actenon_shipguard as _sg
+_PKG_DIR = Path(_sg.__file__).resolve().parent          # the INSTALLED package dir (wheel or editable)
+PKG = Path(__file__).resolve().parents[1]                # repo root (lab-relative tsx fallback only)
+FIXTURES = _PKG_DIR / "_bundled"                         # packaged resources, not repo-relative
 # Resolve tsx portably: SHIPGUARD_TSX env, PATH (CI installs it globally), or the lab sibling repo.
 TSX = _find_tsx(None)
-PROPERTY_VERIFY = PKG / "src" / "actenon_shipguard" / "property_verify.mjs"
+PROPERTY_VERIFY = _PKG_DIR / "property_verify.mjs"
 MODULE = "src/settle.ts"
 EXPORT = "allocate"
 

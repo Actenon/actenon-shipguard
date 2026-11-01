@@ -28,7 +28,7 @@ from typing import Any
 from .adapters.base import AgentResult
 from .trust import sha256_hex
 
-FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
+FIXTURES = Path(__file__).resolve().parent / "_bundled"
 PROPERTY_VERIFY = Path(__file__).resolve().parent / "property_verify.mjs"
 MODULE = "src/settle.ts"
 EXPORT = "allocate"

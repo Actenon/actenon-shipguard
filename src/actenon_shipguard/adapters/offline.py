@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .base import AgentResult, git_diff
 
-FIXTURES = Path(__file__).resolve().parents[3] / "fixtures"
+FIXTURES = Path(__file__).resolve().parents[1] / "_bundled"
 _WRONG = FIXTURES / "candidates" / "arm-a-rounding.ts"     # passes ordinary tests, violates conservation
 _CORRECT = FIXTURES / "candidates" / "arm-b-correct.ts"    # largest-remainder, conserves total
 

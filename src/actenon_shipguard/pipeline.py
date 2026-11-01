@@ -28,7 +28,7 @@ from .receipts import verify_sentinel_receipt
 from .trust import generate_trust_roots, sha256_hex
 
 PKG = Path(__file__).resolve().parent
-FIXTURES = PKG.parent.parent / "fixtures"
+FIXTURES = PKG / "_bundled"
 PROPERTY_VERIFY = PKG / "property_verify.mjs"
 MODULE = "src/settle.ts"
 EXPORT = "allocate"
