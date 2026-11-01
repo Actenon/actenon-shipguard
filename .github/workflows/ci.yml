@@ -40,4 +40,6 @@ jobs:
         run: actenon-shipguard demo --out /tmp/sg-demo --trials 20000
 
       - name: Confirm demo verdict
-        run: test -f /tmp/sg-demo/demo-summary.json && grep -q '"decision": "ALLOW"' /tmp/sg-demo/demo-summary.json
+        run: |
+          test -f /tmp/sg-demo/demo-summary.json
+          grep -q '"decision": "ALLOW"' /tmp/sg-demo/demo-summary.json

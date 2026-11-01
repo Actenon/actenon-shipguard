@@ -25,14 +25,20 @@ from actenon_shipguard import (
 )
 from actenon_shipguard.certs import verify_certificate
 from actenon_shipguard.proofs import AuthorityVerifier
+from actenon_shipguard.cli import _find_tsx
 
 PKG = Path(__file__).resolve().parents[1]
 FIXTURES = PKG / "fixtures"
-LAB = PKG.parent
-TSX = LAB / "sentinel-verified" / "node_modules" / ".bin" / "tsx"
+# Resolve tsx portably: SHIPGUARD_TSX env, PATH (CI installs it globally), or the lab sibling repo.
+TSX = _find_tsx(None)
 PROPERTY_VERIFY = PKG / "src" / "actenon_shipguard" / "property_verify.mjs"
 MODULE = "src/settle.ts"
 EXPORT = "allocate"
+
+pytestmark = pytest.mark.skipif(
+    TSX is None or not Path(TSX).exists(),
+    reason="tsx not available (install Node + tsx, or set SHIPGUARD_TSX)",
+)
 
 
 def sha(b: bytes) -> str:
