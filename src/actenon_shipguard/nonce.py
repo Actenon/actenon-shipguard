@@ -15,13 +15,14 @@ exactly one wins the claim and the other is refused.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 RESERVED = "reserved"
 COMMITTED = "committed"
@@ -146,22 +147,30 @@ class NonceStore:
     def rollback(self, *, nonce: str, outcome: dict[str, Any]) -> NonceRecord:
         return self._resolve(nonce, ROLLED_BACK, outcome)
 
-    def reconcile(self, *, nonce: str, resolution: str, evidence: dict[str, Any]) -> NonceRecord:
-        """Resolve an UNCERTAIN reserved nonce using signed external evidence.
+    def reconcile(self, *, nonce: str, resolution: str, evidence: dict[str, Any],
+                  verify_evidence: "Callable[[dict[str, Any], str, str], bool]") -> NonceRecord:
+        """Resolve an UNCERTAIN reserved nonce using cryptographically verified evidence.
 
-        ``resolution`` must be 'committed' or 'rolled_back'; ``evidence`` must carry
-        a verifier/operator signature establishing whether the external effect really
-        occurred. This is the only safe way to clear an uncertain outcome — the side
-        effect is never blindly re-run.
+        ``verify_evidence(evidence, nonce, resolution)`` MUST verify the evidence signature against
+        an authorised PINNED trust root and bind it to this exact nonce and resolution. Arbitrary
+        ``signature`` / ``established_by`` strings are never accepted — a caller-supplied string is
+        not proof. This is the only safe way to clear an uncertain outcome; the side effect is never
+        blindly re-run.
         """
         if resolution not in (COMMITTED, ROLLED_BACK):
             raise ValueError("resolution must be 'committed' or 'rolled_back'")
-        if not evidence.get("signature") or not evidence.get("established_by"):
-            raise ReplayRefused("RECONCILE_EVIDENCE_MISSING", "reconcile requires signed evidence establishing the outcome")
         rec = self.get(nonce)
         if rec is None:
             raise ReplayRefused("NONCE_UNKNOWN", f"cannot reconcile unknown nonce {nonce}")
-        return self._resolve(nonce, resolution, {"reconciled": True, **evidence})
+        if rec.state != RESERVED:
+            raise ReplayRefused("RECONCILE_NOT_UNCERTAIN", f"nonce {nonce} is {rec.state}, not uncertain")
+        if not callable(verify_evidence) or not verify_evidence(evidence, nonce, resolution):
+            raise ReplayRefused(
+                "RECONCILE_EVIDENCE_INVALID",
+                "reconciliation evidence failed cryptographic verification against an authorised trust root",
+            )
+        digest = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode()).hexdigest()
+        return self._resolve(nonce, resolution, {"reconciled": True, "evidence_digest": digest})
 
     def _resolve(self, nonce: str, state: str, outcome: dict[str, Any]) -> NonceRecord:
         cur = self._conn.execute(

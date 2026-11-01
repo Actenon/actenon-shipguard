@@ -19,6 +19,7 @@ Gate order (all must hold before any side effect):
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -118,14 +119,27 @@ class ProtectedResource:
         # 2. Expiry.
         if datetime.fromisoformat(auth.expires_at.replace("Z", "+00:00")) < datetime.now(timezone.utc):
             raise PermissionError("unauthorised: gate authorization expired")
-        # 3. Re-verify the EXACT artifact that will execute (defence in depth at the edge).
-        actual = sha256_hex(Path(code_path).read_bytes())
+        # 3. TOCTOU elimination: read the certified bytes ONCE, then execute from an immutable
+        #    snapshot written from those exact in-memory bytes. The artifact that runs is provably
+        #    the artifact that was hashed — the mutable original is never re-read before import.
+        #    (Same-OS-account immutability is a documented limit; this closes the check/use race.)
+        code_bytes = Path(code_path).read_bytes()
+        actual = sha256_hex(code_bytes)
         if actual != auth.code_artifact_sha256:
             raise PermissionError(f"unauthorised: code artifact {actual[:12]}… != authorised {auth.code_artifact_sha256[:12]}…")
-        # 4. Mediated invocation of the certified implementation — the real side effect.
-        total = auth.parameters["total_pence"]
-        parties = auth.parameters["parties"]
-        shares = self._invoke_certified(Path(code_path), auth.export, [total, parties])
+        snap_dir = Path(tempfile.mkdtemp(prefix="shipguard-snapshot-"))
+        snapshot = snap_dir / "certified.ts"
+        try:
+            snapshot.write_bytes(code_bytes)
+            snapshot.chmod(0o444)
+            if sha256_hex(snapshot.read_bytes()) != auth.code_artifact_sha256:
+                raise PermissionError("unauthorised: immutable snapshot digest does not match the authorised artifact")
+            # 4. Mediated invocation of the certified snapshot — the real side effect.
+            total = auth.parameters["total_pence"]
+            parties = auth.parameters["parties"]
+            shares = self._invoke_certified(snapshot, auth.export, [total, parties])
+        finally:
+            shutil.rmtree(snap_dir, ignore_errors=True)
         # 5. Atomic write of the disbursement record produced BY the certified code.
         self._out_dir.mkdir(parents=True, exist_ok=True)
         record = {
@@ -180,6 +194,29 @@ class EdgeGate:
             d = GateDecision(REFUSE, "AUTHORITY", "PROOF_INVALID", f"authority proof failed: {getattr(e,'refusal_code',e)}")
             self._record(d); return d
 
+        # 1b. INTENT EQUALITY — every value about to execute must EXACTLY equal the verified
+        #     authorised intent (parameters, resource identity, capability, certified export/module).
+        #     This blocks reusing a valid small-value authorisation for a different, larger action,
+        #     and is checked BEFORE any nonce reservation or side effect.
+        vaction = verified.pccb.action
+        auth_params = dict(vaction.parameters)
+        auth_resource = verified.pccb.target.resource_id
+        auth_capability = vaction.capability
+        mismatches = []
+        if parameters != auth_params:
+            mismatches.append(f"parameters {parameters} != authorised {auth_params}")
+        if resource_id != auth_resource:
+            mismatches.append(f"resource_id {resource_id!r} != authorised {auth_resource!r}")
+        if export != cert.body["code_artifact"]["export"]:
+            mismatches.append(f"export {export!r} != certified {cert.body['code_artifact']['export']!r}")
+        if module_path != cert.body["code_artifact"]["module"]:
+            mismatches.append(f"module {module_path!r} != certified {cert.body['code_artifact']['module']!r}")
+        if mismatches:
+            d = GateDecision(REFUSE, "AUTHORITY", "INTENT_MISMATCH",
+                             "executed action does not equal the verified authorised intent: " + "; ".join(mismatches),
+                             {"authorised_capability": auth_capability})
+            self._record(d); return d
+
         # 2. CORRECTNESS — certificate under pinned trust root.
         cv = verify_certificate(cert, self._roots)
         if not cv.ok:
@@ -203,7 +240,9 @@ class EdgeGate:
             self._record(d); return d
 
         nonce = pccb_payload.get("nonce")
-        effect_id = sha256_hex(canonicalize_bytes({"resource": resource_id, "params": parameters, "nonce": nonce}))
+        # Effect identity and the executed values are derived from the VERIFIED intent, never from
+        # caller-supplied arguments (which were already required to equal it above).
+        effect_id = sha256_hex(canonicalize_bytes({"resource": auth_resource, "params": auth_params, "nonce": nonce}))
 
         # 4. Durable nonce reservation BEFORE the side effect.
         try:
@@ -215,7 +254,7 @@ class EdgeGate:
         # 5. Mediated invocation of the certified artifact (the real consequential action).
         auth = self._sign_auth(GateAuthorization(
             nonce=nonce, code_artifact_sha256=actual_hash, module_path=module_path, export=export,
-            parameters=parameters, resource_id=resource_id,
+            parameters=auth_params, resource_id=auth_resource,
             expires_at=_plus_seconds(30), signature="",
         ))
         try:
