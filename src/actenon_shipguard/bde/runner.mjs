@@ -443,11 +443,17 @@ async function main() {
   for (const law of pack.laws || []) {
     const started = Date.now();
     const result = await new Promise((resolve) => {
+      let settled = false;
+      const settle = (v) => { if (!settled) { settled = true; clearTimeout(timer); resolve(v); } };
       const w = new Worker(new URL(import.meta.url), { workerData: { law, modulePath } });
-      const timer = setTimeout(() => { w.terminate(); }, perLawMs);
-      w.on('message', (m) => { clearTimeout(timer); w.terminate(); resolve(m); });
-      w.on('error', (e) => { clearTimeout(timer); w.terminate(); resolve({ ok: false, error: `${e?.constructor?.name}: ${e?.message}` }); });
-      w.on('exit', (code) => { clearTimeout(timer); if (code !== 0 && code !== 1) resolve({ ok: false, error: `worker exited with code ${code}` }); });
+      const timer = setTimeout(() => { try { w.terminate(); } catch { /* already gone */ } }, perLawMs);
+      w.on('message', (m) => { try { w.terminate(); } catch { /* already gone */ } settle(m); });
+      w.on('error', (e) => {
+        try { w.terminate(); } catch { /* already gone */ }
+        settle({ ok: false, error: `${e?.constructor?.name}: ${e?.message}` });
+      });
+      // terminate() (timeout) or a crash surfaces as an exit without any message
+      w.on('exit', (code) => settle({ ok: false, error: `worker exited with code ${code} (wall-clock timeout or crash)` }));
     });
     const duration = Date.now() - started;
     if (!result.ok) {

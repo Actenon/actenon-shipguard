@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -181,6 +182,25 @@ def run_bde(source_repo: Path, *, module: str | None = None, export: str | None 
     work = Path(work_dir) if work_dir else out_dir / "tmp"
     work.mkdir(parents=True, exist_ok=True)
     clone = clone_isolated(source_repo, work)
+    # A developer's candidate is often an UNCOMMITTED working tree. git clone cannot carry
+    # it, so tracked-file modifications are copied into the disposable clone verbatim
+    # (the original is still only read). Untracked files are counted and reported, not copied.
+    dirty = subprocess.run(["git", "-C", str(source_repo), "status", "--porcelain"],
+                           capture_output=True, text=True).stdout.splitlines()
+    modified = [ln[3:] for ln in dirty if ln.startswith(" M") or ln.startswith("M ")]
+    untracked = [ln[3:] for ln in dirty if ln.startswith("??")]
+    if modified:
+        for rel in modified:
+            src_file = source_repo / rel
+            if src_file.is_file():
+                dst = clone / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_file, dst)
+        result.notes.append(f"{len(modified)} uncommitted tracked modification(s) carried into "
+                            f"the disposable clone for verification")
+    if untracked:
+        result.notes.append(f"{len(untracked)} untracked file(s) NOT inspected (add and commit "
+                            f"them, or pass --repo at a committed state)")
     result.clone_dir = str(clone)
     result.revision = git_head(clone)
 
