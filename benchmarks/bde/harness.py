@@ -76,14 +76,20 @@ def _discover(repo: Path, module: str, revision: str, tsx: Path):
             "problems": problems, "execution": execution}
 
 
-def _law_passes_at(law: dict[str, Any], repo: Path, module: str, tsx: Path) -> str:
-    """Re-execute ONE law at another revision. PASS | FAIL | ERROR."""
-    from actenon_shipguard.bde.laws import BehaviouralLaw
+def _witness_status_at(law_obj, witness_args: list, repo: Path, module: str, tsx: Path) -> str:
+    """Re-execute ONE law restricted to ONE specific witness input at another revision.
+
+    This is WITNESS-level scoring: the question is whether the engine's reported minimal
+    input still violates the law after the upstream fix — i.e. whether the witness
+    reproduces the historical defect — independent of what the law's full domain does.
+    """
     from actenon_shipguard.bde.strategies import execution_for
-    law_obj = BehaviouralLaw.from_dict(dict(law))
     entry = execution_for(law_obj)
     if entry is None:
         return "ERROR"
+    gen = dict(entry.get("gen") or {})
+    gen.update({"mode": "literal", "args": witness_args, "shrink": False})
+    entry = {**entry, "gen": gen}
     pack = {"schema_version": 1, "module": module, "git_revision": "", "laws": [entry]}
     rep = run_lawpack(pack, repo, tsx, laws_meta={law_obj.law_id: law_obj}, mode="discover")
     o = rep.outcomes_for(law_obj.law_id)
@@ -91,9 +97,10 @@ def _law_passes_at(law: dict[str, Any], repo: Path, module: str, tsx: Path) -> s
 
 
 def _finding_signature(f: dict[str, Any]) -> str:
+    """Robust behavioural-family signature (export:kind) — stable across README/JSDoc copies
+    of the same documented example and across revision line shifts."""
     law = f.get("law") or {}
-    g = law.get("grounding") or {}
-    return f"{law.get('export')}:{f.get('kind')}:{g.get('file')}:{g.get('line_start')}"
+    return f"{law.get('export')}:{f.get('kind')}"
 
 
 def run_track_a(work: Path, tsx: Path, v020: dict[str, Any], audit: dict[str, str]) -> dict[str, Any]:
@@ -116,7 +123,9 @@ def run_track_a(work: Path, tsx: Path, v020: dict[str, Any], audit: dict[str, st
         }
         for f in (ex.findings if ex else []):
             law = f.get("law") or {}
-            status_at_fix = _law_passes_at(law, fix_repo, mod, tsx)
+            full_law = next((l for l in d["laws"] if l.law_id == law.get("law_id")), None)
+            witness = f.get("args") if isinstance(f.get("args"), list) else (f.get("original_args") or [])
+            status_at_fix = _witness_status_at(full_law, witness, fix_repo, mod, tsx) if full_law else "ERROR"
             sig = _finding_signature(f)
             label = "FALSE_POSITIVE"
             if status_at_fix == "PASS":
@@ -128,8 +137,8 @@ def run_track_a(work: Path, tsx: Path, v020: dict[str, Any], audit: dict[str, st
                 "statement": (law.get("statement") or "")[:140],
                 "grounding": {k: (law.get("grounding") or {}).get(k)
                               for k in ("file", "line_start", "source_type")},
-                "witness": f.get("args"), "detail": (f.get("detail") or "")[:220],
-                "status_at_fix_revision": status_at_fix, "label": label,
+                "witness": witness, "detail": (f.get("detail") or "")[:220],
+                "witness_status_at_fix_revision": status_at_fix, "label": label,
             }
             task_rec["findings"].append(finding_rec)
         if any(x["label"] == "DISCOVERED_DEFECT" for x in task_rec["findings"]):
@@ -216,19 +225,26 @@ def freeze(engine_commit: str) -> dict[str, Any]:
                 "MISS": "no target-defect finding",
             },
             "audit_labels": {
-                # ufo README examples that verifiably contradict the code (see report §audit)
-                "isScriptProtocol:documented_result_mismatch:README.md:349": "TRUE_DOC_DRIFT",
-                "isScriptProtocol:documented_result_mismatch:README.md:351": "TRUE_DOC_DRIFT",
-                "isScriptProtocol:documented_result_mismatch:README.md:353": "TRUE_DOC_DRIFT",
-                "isScriptProtocol:documented_result_mismatch:README.md:355": "TRUE_DOC_DRIFT",
-                "isScriptProtocol:documented_result_mismatch:src/utils.ts:": "TRUE_DOC_DRIFT",
-                "normalizeURL:documented_result_mismatch:README.md:387": "TRUE_DOC_DRIFT",
-                "normalizeURL:documented_result_mismatch:README.md:390": "TRUE_DOC_DRIFT",
-                "withFragment:documented_result_mismatch:README.md:428": "TRUE_DOC_DRIFT",
-                "withFragment:documented_result_mismatch:README.md:429": "TRUE_DOC_DRIFT",
-                "withFragment:documented_result_mismatch:README.md:430": "TRUE_DOC_DRIFT",
-                # 9927800 splits at caseless chars; upstream 57cfd15 changed exactly this
-                "splitByCase:unjustified_boundary:": "TRUE_DELAYED_FIX",
+                # robust export:kind keys — the same documented example appears in the README and
+                # in generated JSDoc copies (automd); line numbers shift between revisions, so
+                # labels match on the behavioural family, not on positions
+                "isScriptProtocol:documented_result_mismatch": "TRUE_DOC_DRIFT",
+                "normalizeURL:documented_result_mismatch": "TRUE_DOC_DRIFT",
+                "withFragment:documented_result_mismatch": "TRUE_DOC_DRIFT",
+                # 9927800 splitByCase splits at caseless characters; upstream 57cfd15
+                # ("assume characters lowercase by default") changed exactly this behaviour
+                "splitByCase:unjustified_boundary": "TRUE_DELAYED_FIX",
+            },
+            "audit_evidence": {
+                "isScriptProtocol": "tsx -e 'import {isScriptProtocol} from "./src/index.ts"; "
+                                     "console.log(isScriptProtocol("javascript:alert(1)"))' -> false, "
+                                     "while README/JSDoc document `// true`",
+                "normalizeURL": "README documents 'test?query=123%20123#hash,%20test'; the code returns "
+                                "'test?query=123+123#hash,%20test' (space -> + vs %20)",
+                "withFragment": "README documents withFragment('/foo#bar', '') -> '/foo'; the code "
+                                "returns '/foo#bar' (empty hash does not remove the fragment)",
+                "splitByCase": "at 9927800 splitByCase('a-', []) -> ['a','-']; at 57cfd15 the same "
+                               "call -> ['a-'] (upstream changed caseless-char handling)",
             },
         },
         "track_b": {

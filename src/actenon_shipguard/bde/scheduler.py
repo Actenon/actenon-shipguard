@@ -138,28 +138,30 @@ def run_lawpack(pack: dict[str, Any], repo: Path, tsx: Path, *, per_law_ms: int 
         rep.not_run = len(pack.get("laws") or [])
         return rep
     meta = laws_meta or {}
-    findings_by_law: dict[str, dict[str, Any]] = {}
+    findings_by_law: dict[str, list[dict[str, Any]]] = {}
     for f in out.get("findings", []):
-        findings_by_law[str(f.get("law_id"))] = dict(f)
+        findings_by_law.setdefault(str(f.get("law_id")), []).append(dict(f))
     for r in out.get("law_results", []):
         status = r.get("status", "ERROR")
+        law_findings = findings_by_law.get(r.get("law_id")) or []
         o = LawOutcome(law_id=r.get("law_id", "?"), predicate=r.get("predicate", "?"), status=status,
                        trials=r.get("trials", 0), detail=r.get("detail"), shrunk=r.get("shrunk"),
-                       duration_ms=r.get("duration_ms", 0), finding=findings_by_law.get(r.get("law_id")))
+                       duration_ms=r.get("duration_ms", 0),
+                       finding=law_findings[0] if law_findings else None)
         rep.outcomes.append(o)
         if status == "PASS":
             rep.passed += 1
         elif status == "FAIL":
             rep.failed += 1
-            f = dict(findings_by_law.get(o.law_id) or {})
-            law = meta.get(o.law_id)
-            f["bde_status"] = _classify_finding(law, mode) if law else STATUS_REVIEW
-            if law:
-                f["law"] = {k: v for k, v in law.to_dict().items()
-                            if k in ("law_id", "statement", "kind", "predicate", "module", "export",
-                                     "evidence_class", "approval", "confidence", "limitations",
-                                     "qualification", "grounding", "verification")}
-            rep.findings.append(f)
+            for f in law_findings:
+                law = meta.get(o.law_id)
+                f["bde_status"] = _classify_finding(law, mode) if law else STATUS_REVIEW
+                if law:
+                    f["law"] = {k: v for k, v in law.to_dict().items()
+                                if k in ("law_id", "statement", "kind", "predicate", "module", "export",
+                                         "evidence_class", "approval", "confidence", "limitations",
+                                         "qualification", "grounding", "verification")}
+                rep.findings.append(f)
         elif status == "ERROR":
             rep.errors += 1
         elif status == "SKIP":

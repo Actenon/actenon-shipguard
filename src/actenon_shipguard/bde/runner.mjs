@@ -357,23 +357,25 @@ async function executeLaw(law, modulePath) {
       minimal = s.args; shrunk = s.shrunk;
     }
     const m = check(minimal);
-    return {
-      law_id: law.law_id, status: 'FAIL', trials: 1, shrunk,
-      finding: {
-        law_id: law.law_id, predicate: law.predicate, export: law.export,
-        args: minimal, original_args: gen.args, shrunk,
-        kind: m?.kind || r?.kind, detail: (m && m.detail) || r.detail,
-        observed: m ? m.observed : undefined, expected: m ? m.expected : r.expected,
-        boundary_index: m ? m.boundary_index : r.boundary_index,
-        boundary_char: m ? m.boundary_char : r.boundary_char,
-        segment_before: m ? m.segment_before : r.segment_before,
-        segment_after: m ? m.segment_after : r.segment_after,
-        first_failing_trial: 0,
-      },
+    const finding = {
+      law_id: law.law_id, predicate: law.predicate, export: law.export,
+      args: minimal, original_args: gen.args, shrunk,
+      kind: m?.kind || r?.kind, detail: (m && m.detail) || r.detail,
+      observed: m ? m.observed : undefined, expected: m ? m.expected : r.expected,
+      boundary_index: m ? m.boundary_index : r.boundary_index,
+      boundary_char: m ? m.boundary_char : r.boundary_char,
+      segment_before: m ? m.segment_before : r.segment_before,
+      segment_after: m ? m.segment_after : r.segment_after,
+      first_failing_trial: 0,
     };
+    return { law_id: law.law_id, status: 'FAIL', trials: 1, shrunk, finding, findings: [finding] };
   }
 
-  // generated-mode laws
+  // generated-mode laws: collect up to MAX_WITNESSES DISTINCT failing inputs — different
+  // witnesses are different evidence for the same violated law (e.g. a digit boundary and
+  // a caseless-char boundary), and each is minimised independently.
+  const MAX_WITNESSES = 3;
+  const witnesses = [];
   const rnd = mulberry32(gen.seed ?? 1234567);
   const trials = gen.trials ?? 200;
   let executed = 0;
@@ -390,21 +392,23 @@ async function executeLaw(law, modulePath) {
     if (r && !r.ok && !r.skipped) {
       const s = shrinkArgs(args, check);
       const m = check(s.args);
-      return {
-        law_id: law.law_id, status: 'FAIL', trials: executed, shrunk: s.shrunk,
-        finding: {
-          law_id: law.law_id, predicate: law.predicate, export: law.export,
-          args: s.args, original_args: args, shrunk: s.shrunk,
-          kind: r.kind, detail: (m && m.detail) || r.detail,
-          observed: m ? m.observed : r.observed, expected: m ? m.expected : r.expected,
-          boundary_index: m ? m.boundary_index : r.boundary_index,
-          boundary_char: m ? m.boundary_char : r.boundary_char,
-          segment_before: m ? m.segment_before : r.segment_before,
-          segment_after: m ? m.segment_after : r.segment_after,
-          first_failing_trial: executed,
-        },
-      };
+      witnesses.push({
+        law_id: law.law_id, predicate: law.predicate, export: law.export,
+        args: s.args, original_args: args, shrunk: s.shrunk,
+        kind: r.kind, detail: (m && m.detail) || r.detail,
+        observed: m ? m.observed : r.observed, expected: m ? m.expected : r.expected,
+        boundary_index: m ? m.boundary_index : r.boundary_index,
+        boundary_char: m ? m.boundary_char : r.boundary_char,
+        segment_before: m ? m.segment_before : r.segment_before,
+        segment_after: m ? m.segment_after : r.segment_after,
+        first_failing_trial: executed,
+      });
+      if (witnesses.length >= MAX_WITNESSES) break;
     }
+  }
+  if (witnesses.length > 0) {
+    return { law_id: law.law_id, status: 'FAIL', trials: executed, shrunk: witnesses[0].shrunk,
+             finding: witnesses[0], findings: witnesses };
   }
   return { law_id: law.law_id, status: 'PASS', trials: executed };
 }
@@ -454,7 +458,9 @@ async function main() {
     const r = result.result;
     out.law_results.push({ law_id: law.law_id, predicate: law.predicate, status: r.status, trials: r.trials, detail: r.detail, shrunk: r.shrunk, duration_ms: duration });
     out.executed++;
-    if (r.status === 'FAIL' && r.finding) out.findings.push(r.finding);
+    for (const fl of (r.findings || (r.finding ? [r.finding] : []))) {
+      out.findings.push(fl);
+    }
   }
   process.stdout.write(JSON.stringify(out, null, 2));
   process.exit(out.findings.length > 0 ? 1 : 0);

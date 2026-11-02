@@ -35,10 +35,12 @@ OPERATORS: list[tuple[str, str, tuple[str, str], int]] = [
     ("return-void", "blank the first 'return ' statement value", ("return ", "return undefined; //"), 1),
 ]
 
-# Harmless refactor controls: transformations that must NOT trigger findings.
+# Harmless refactor controls: transformations that are PROVABLY behaviour-preserving.
+# (A declaration rename without renaming its references is NOT harmless — it breaks the
+# module — so it is deliberately not used as a control.)
 REFACTOR_CONTROLS: list[tuple[str, str, tuple[str, str]]] = [
-    ("comment",     "append a source comment", ("", "\n// refactored: harmless comment\n")),
-    ("local-rename", "rename a common local identifier", ("const parts", "const segments")),
+    ("comment",   "append a source comment", ("", "\n// refactored: harmless comment\n")),
+    ("blankline", "insert a blank line before the first export", ("export ", "\nexport ")),
 ]
 
 
