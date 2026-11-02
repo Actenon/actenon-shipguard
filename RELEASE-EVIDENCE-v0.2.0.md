@@ -341,7 +341,7 @@ requirement is violated" can occur. That is a genuine scope limit, not a tuning 
 | 7 | Apprentice/Howdex/Workproof real **or** explicitly excluded | **MET (excluded)** — see FIFTH |
 | 8 | Historical v0.1.2 security controls still pass | **MET** — `tests/test_trust_boundary.py` still exactly 31 tests, unchanged, passing within the 127 |
 | 9 | Clean installation reproduces the supported workflow | **MET** — wheel → fresh venv → doctor/demo/run from unrelated cwd |
-| 10 | CI passes against the exact release commit | see note below — re-checked against the final commit before any publication decision |
+| 10 | CI passes against the exact release commit | **MET** on `59ab439` — run [41460094532](https://github.com/Actenon/actenon-shipguard/actions/runs/41460094532): `verify (3.11)` 120 passed / 8 deselected, `verify (3.12)` 120 passed / 8 deselected, `sentinel-integration` 8 passed / 120 deselected, **0 skipped** in every job, with the pipefail + `${PIPESTATUS[0]}` control in force. An earlier claim of MET on `6d3a6b4`/`e238281` is **withdrawn as a false green** — see below |
 | 11 | Every limitation honestly documented | **MET** — this document plus `BENCHMARK-REPORT-v0.2.0.md` §7 and the manifest's measured exclusion reasons |
 
 ### The two claims, separated
@@ -378,6 +378,39 @@ supply. Two concrete paths: (a) re-run when Codex's quota resets on 2026-11-08, 
 may fail where Claude did not, and the harness records the agent actually used; (b) extend the corpus
 within the measured constraints to harder add-only tasks (larger diffs, multi-file scope, subtler
 boundary conditions) — declared and frozen in advance, never after seeing a result.
+
+### CI status and a corrected false green
+
+An earlier revision of this document recorded condition 10 as **MET**, citing CI run `41434542606`
+green on commit `6d3a6b4`/`e238281`. **That evidence was wrong and is withdrawn.** The run's own log
+contains four adapter-test failures; the step still exited 0 because the workflow used
+`pytest … | tee` without `pipefail`, so tee's status became the pipeline's status. The Phase 1
+hardening (`set -euo pipefail` plus an explicit `${PIPESTATUS[0]}` assertion, with a negative control
+proving it has teeth) is what turned that hidden failure into a red job. In other words: the control
+added in Phase 1 immediately caught a false green that had been accepted as release evidence.
+
+The underlying failures were environment dependence in the *tests*, not defects in the product:
+
+- Four adapter tests asserted confinement, consent gating and auth-probe behaviour but never stubbed
+  `shutil.which`, so on a runner with no `codex`/`claude` binary `available()` short-circuited to
+  "CLI not found" and those assertions never actually exercised the adapter. Fixed by stubbing the
+  CLI's presence through one shared helper (`59ab439`).
+- Ten safe-mode tests symlinked a shared `node_modules` resolved from a sibling Sentinel checkout
+  that does not exist on a runner, so `Path.symlink_to(None)` raised `TypeError`. Fixed with a stub
+  directory; tests that actually execute vitest remain marked `sentinel_integration` and still
+  require the real prerequisite, so the stub cannot mask a missing one (`59ab439`).
+- Separately, `clone_isolated` did not set a git identity in the disposable clone. A clone does not
+  inherit the source's local config and a runner has no global identity, so committing the *verified*
+  candidate died with exit 128 — safe mode could verify a real repository and then fail at the last
+  step. This one was a genuine product bug, fixed in `af92ca7` with a regression test that
+  neutralises `HOME`, `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM`, confirmed by negative control.
+
+All three were invisible locally because this machine has the CLIs, the sibling checkout, and a
+global git identity. Verified under a faithful simulation of the runner (no sibling `node_modules`,
+no `codex`/`claude`): 120 passed, 8 deselected, 0 failed, 0 skipped.
+
+Condition 10 is recorded as MET only against a run that is green on the exact commit being described,
+with the run id stated, and only after the pipefail control is in place.
 
 ---
 
