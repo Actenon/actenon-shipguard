@@ -75,6 +75,48 @@ class RunRecord:
         return d
 
 
+def sync_file_modes_to_index(repo: Path) -> dict[str, int]:
+    """Sync on-disk file modes to the Git index in a repo SHIPGUARD created.
+
+    Why: a checkout (or ``shutil.copy``, which preserves source mode) under a umask of 002 —
+    common on shared machines and containers — leaves group-writable 0664 files on disk while
+    the Git index records 100644 for the same paths. Sentinel binds its baseline snapshot to
+    the index and its candidate snapshot to the working tree, so every scaffold file would be
+    reported as a mode-only "change" and verification would refuse for an ENVIRONMENT reason,
+    not a behavioural one (measured: 5 integration tests fail under umask 002, all green under
+    022). This is the same class of host-dependence as the global-git-identity fix (af92ca7):
+    the run must not depend on the host's umask.
+
+    Only repos ShipGuard itself created (disposable clones / synthetic fixtures) are synced —
+    never a developer's original tree — and only regular files: symlinks and the 160000 gitlink
+    mode are left untouched. Returns a count for evidence.
+    """
+    out = subprocess.run(["git", "-C", str(repo), "ls-files", "-s"], capture_output=True, text=True)
+    synced = 0
+    for line in out.stdout.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) != 4:
+            continue
+        mode, _sha, _stage, rel = parts
+        if mode not in ("100644", "100755"):
+            continue                      # symlinks (120000) and submodules stay as-is
+        p = Path(repo) / rel
+        if not p.exists() or p.is_symlink():
+            continue
+        want = 0o644 if mode == "100644" else 0o755
+        if (p.stat().st_mode & 0o777) != want:
+            p.chmod(want)
+            synced += 1
+    return {"files_mode_synced": synced}
+
+
+def _normalize_untracked_modes(repo: Path, *files: Path) -> None:
+    """Normalise files written before their first ``git add`` (not yet in the index)."""
+    for f in files:
+        if f.exists() and not f.is_symlink():
+            f.chmod(0o644)
+
+
 def setup_repo(work: Path, node_modules: Path, *, baseline: str = "baseline-buggy.ts",
                module: str = MODULE, test_src: str = "target-settlement/src/settle.test.ts",
                test_dest: str = "src/settle.test.ts") -> Path:
@@ -94,11 +136,14 @@ def setup_repo(work: Path, node_modules: Path, *, baseline: str = "baseline-bugg
     # an unsupported node_modules entry. It is present on disk (for vitest) but gitignored. The
     # pattern has NO trailing slash so it also matches a node_modules *symlink* (not just a dir).
     (repo / ".gitignore").write_text("node_modules\n")
+    # Umask-independence: files not yet in the index get explicit 0644 (see sync_file_modes_to_index).
+    _normalize_untracked_modes(repo, repo / module, repo / test_dest, repo / "package.json", repo / ".gitignore")
     if node_modules and Path(node_modules).exists():
         (repo / "node_modules").symlink_to(Path(node_modules), target_is_directory=True)
     for args in (["init", "-q"], ["config", "user.email", "sg@shipguard.local"], ["config", "user.name", "shipguard"],
                  ["add", "-A"], ["commit", "-qm", f"baseline: buggy {Path(module).stem}"]):
         subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    sync_file_modes_to_index(repo)
     return repo
 
 
@@ -214,6 +259,7 @@ def clone_isolated(src_repo: Path, work: Path, node_modules: Path | None = None)
                  ["config", "user.name", "Actenon ShipGuard (isolated verification clone)"],
                  ["config", "commit.gpgsign", "false"]):
         subprocess.run(["git", "-C", str(dest), *args], check=True, capture_output=True)
+    sync_file_modes_to_index(dest)      # umask-independence: on-disk modes must match the index
     nm_src = Path(node_modules) if node_modules else (src_repo / "node_modules")
     if nm_src.exists() and not (dest / "node_modules").exists():
         (dest / "node_modules").symlink_to(nm_src, target_is_directory=True)

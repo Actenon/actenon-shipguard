@@ -438,6 +438,10 @@ def _candidate_repo(tmp_path: Path, candidate: Path) -> Path:
         subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
     import shutil as sh
     sh.copy(candidate, repo / MODULE)
+    # Umask-independence (see orchestrator.sync_file_modes_to_index): a shutil.copy under
+    # umask 002 carries 0664 bits that make every file a mode-only "change" for the snapshot diff.
+    from actenon_shipguard.orchestrator import sync_file_modes_to_index
+    sync_file_modes_to_index(repo)
     return repo
 
 

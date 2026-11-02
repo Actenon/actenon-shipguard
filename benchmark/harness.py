@@ -49,6 +49,7 @@ from actenon_shipguard.orchestrator import (  # noqa: E402
     repo_fingerprint,
     run_ordinary_tests,
     run_sentinel_challenge,
+    sync_file_modes_to_index,
     validate_change_scope,
 )
 from actenon_shipguard.sentinel import bind_committed_tree, find_sentinel  # noqa: E402
@@ -421,6 +422,7 @@ def _prepare(repo: Path, project: str) -> None:
     # own .gitignore, so no corpus file is modified — and a bare pattern is required because the
     # `node_modules/` form several upstream .gitignore files use does NOT match a symlink.
     exclude_node_modules(repo)
+    sync_file_modes_to_index(repo)      # umask-independence: modes must match the index before the scaffold commit
 
 
 def materialize(task: dict, work: Path, *, at: str) -> Path:

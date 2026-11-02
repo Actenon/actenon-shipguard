@@ -162,6 +162,10 @@ def _make_repo(tmp_path: Path, candidate: Path) -> Path:
         subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
     import shutil as _sh
     _sh.copy(candidate, repo / MODULE)        # the candidate change (uncommitted) vs baseline HEAD
+    # Umask-independence (orchestrator.sync_file_modes_to_index): under umask 002 the scaffold
+    # files carry 0664 bits and every file becomes a mode-only "change" for the snapshot diff.
+    from actenon_shipguard.orchestrator import sync_file_modes_to_index
+    sync_file_modes_to_index(repo)
     return repo
 
 
