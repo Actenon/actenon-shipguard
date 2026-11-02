@@ -70,9 +70,14 @@ actenon-shipguard verify --cert C --trust-roots R   # independently verify a cer
 actenon-shipguard report --out DIR --open            # render the HTML report
 ```
 
-`actenon-shipguard run "task" --agent claude|codex` (the real coding-agent repair loop) is
-**not wired in v0.1.2** — it reports this honestly rather than faking success. It is the
-primary deliverable of the in-development **v0.2.0**.
+`actenon-shipguard run "task" --agent codex|claude|offline [--contract C]` (the real coding-agent
+repair loop) is **implemented and tested on the in-development `v0.2.0` branch**: it drives a real
+agent change, runs ordinary tests, and uses the **real Sentinel verifier** (structured receipts) as the
+independent acceptance authority, feeding a reproducible counterexample back to drive a bounded repair.
+**v0.2.0 is not yet released (NO-GO)** — the live agent produced correct code on the tested tasks, so a
+*live-agent-produced* defect→repair was not demonstrated honestly. See
+[`RELEASE-EVIDENCE-v0.2.0.md`](RELEASE-EVIDENCE-v0.2.0.md). On the released **v0.1.2**, `run` still
+reports "not wired" rather than faking success.
 
 ### What `demo` proves (real, measured)
 
@@ -113,7 +118,10 @@ and **key-storage isolation** (no private key in the workspace; isolated mode fa
   A *cooperative local* boundary: it proves an action cannot traverse the configured gate without
   policy, but it is **not** an unbypassable OS sandbox — a rogue agent that refuses to call the gate
   is not stopped by it. Hard containment needs Actenon airlock Protected Mode + containers.
-- **Mode A — local development repair loop: blocked** (real Claude/Codex adapter not wired).
+- **Mode A — local development repair loop: implemented + tested on the `v0.2.0` branch, not yet
+  released.** Real Sentinel is the acceptance authority; live Codex is authenticated and produced
+  independently-verified fixes; live Claude is disabled (expired OAuth). v0.2.0 is **NO-GO** pending an
+  honest live-agent-produced defect→repair demonstration (see `RELEASE-EVIDENCE-v0.2.0.md`).
 - **Mode B — PR protection / GitHub Actions: scaffolded, not validated** (workflow present, unrun).
 
 ## Relationship to the ecosystem
