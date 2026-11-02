@@ -1,0 +1,47 @@
+{
+  "schema": "actenon-shipguard/bde/benchmark-manifest/1",
+  "frozen_at": "2026-11-02T23:29:09.959032Z",
+  "engine": {
+    "commit": "d51b64d3c22eb4b52ecd1bdc85e5c5c23d926705",
+    "law_catalogue": "intent-compiler/1 + runner predicates v1",
+    "policy": "default (Q1 doc-example and Q2 splitter-boundary promotions enabled)"
+  },
+  "purpose": "Measure, honestly, whether BDE can discover real historical defects from permitted repository evidence alone (no hand-authored acceptance contracts), and quantify mutation sensitivity and false positives on known-valid code.",
+  "track_a": {
+    "corpus": "the frozen v0.2.0 corpus TARGETS ONLY (project, module, fix_commit); the v0.2.0 requirements/contracts/prompts are NOT inputs to BDE at any point",
+    "scoring_rubric": {
+      "DISCOVERED_DEFECT": "law fails at baseline AND passes at the upstream fix (witness reproduces the historical defect)",
+      "TRUE_DOC_DRIFT": "fails at both revisions; documented example verifiably contradicts the code (audited; commands in report)",
+      "TRUE_DELAYED_FIX": "fails at both revisions; upstream later changed exactly this behaviour (audited against a later commit)",
+      "FALSE_POSITIVE": "fails at both revisions with no audit support",
+      "MISS": "no target-defect finding"
+    },
+    "audit_labels": {
+      "isScriptProtocol:documented_result_mismatch": "TRUE_DOC_DRIFT",
+      "normalizeURL:documented_result_mismatch": "TRUE_DOC_DRIFT",
+      "withFragment:documented_result_mismatch": "TRUE_DOC_DRIFT",
+      "splitByCase:unjustified_boundary": "TRUE_DELAYED_FIX"
+    },
+    "audit_evidence": {
+      "isScriptProtocol": "tsx -e 'import {isScriptProtocol} from \"./src/index.ts\"; console.log(isScriptProtocol(\"javascript:alert(1)\"))' -> false, while README/JSDoc document `// true`",
+      "normalizeURL": "README documents 'test?query=123%20123#hash,%20test'; the code returns 'test?query=123+123#hash,%20test' (space -> + vs %20)",
+      "withFragment": "README documents withFragment('/foo#bar', '') -> '/foo'; the code returns '/foo#bar' (empty hash does not remove the fragment)",
+      "splitByCase": "at 9927800 splitByCase('a-', []) -> ['a','-']; at 57cfd15 the same call -> ['a-'] (upstream changed caseless-char handling)"
+    }
+  },
+  "track_b": {
+    "subjects": "the six fix revisions (known-valid) + harmless-refactor controls",
+    "operators": [
+      "eq-flip",
+      "neq-flip",
+      "and-or-flip",
+      "or-and-flip",
+      "true-flip",
+      "false-flip",
+      "not-drop",
+      "return-void"
+    ],
+    "semantics": "a surviving mutation is limited detection sensitivity, never a defect claim; refactor controls must produce zero findings"
+  },
+  "no_post_hoc_changes": "the corpus, rubric and audit labels are frozen before the formal run; results are published as measured"
+}

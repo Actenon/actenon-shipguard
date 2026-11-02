@@ -148,11 +148,16 @@ def run_track_a(work: Path, tsx: Path, v020: dict[str, Any], audit: dict[str, st
         # positive control: discovery at the fix revision must stay clean of UNLABELLED findings
         df = _discover(fix_repo, mod, t["fix_commit"], tsx)
         exf = df["execution"]
-        fix_fps = []
+        fix_findings, fix_fps = [], []
         for f in (exf.findings if exf else []):
             sig = _finding_signature(f)
-            if sig not in audit:
+            label = audit.get(sig, "FALSE_POSITIVE")
+            rec = {"finding": sig, "witness": f.get("args"), "detail": (f.get("detail") or "")[:200],
+                   "label": label}
+            fix_findings.append(rec)
+            if label == "FALSE_POSITIVE":
                 fix_fps.append(sig)
+        task_rec["findings_at_fix_revision"] = fix_findings
         task_rec["positive_control_unlabelled_findings_at_fix"] = fix_fps
         task_rec["laws_at_fix"] = len(df["laws"])
         out["tasks"].append(task_rec)
