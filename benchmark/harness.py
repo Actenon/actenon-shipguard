@@ -34,6 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from actenon_shipguard.adapters.base import git_diff  # noqa: E402
+from actenon_shipguard.adapters.claude import ClaudeAdapter  # noqa: E402
 from actenon_shipguard.adapters.codex import CodexAdapter  # noqa: E402
 from actenon_shipguard.orchestrator import (  # noqa: E402
     _commit_candidate,
@@ -471,13 +472,21 @@ def _common(task: dict, work: Path, frozen: dict) -> tuple[Path, Path]:
     return contract, work / f"store-{task['id']}"
 
 
+def _make_adapter(agent: str):
+    """The live coding agent for this run. Never a scripted or offline stand-in."""
+    if agent == "claude":
+        return ClaudeAdapter()
+    if agent == "codex":
+        return CodexAdapter()
+    raise SystemExit(f"unknown agent {agent!r} (use codex or claude)")
+
+
 def run_arm_no_repair(task: dict, work: Path, arm: str, sentinel, agent_timeout: int,
-                      frozen: dict) -> dict:
+                      frozen: dict, adapter) -> dict:
     """Arms A and B: one fresh agent session, no verification feedback, no repair."""
     contract, store = _common(task, work, frozen)
     repo = materialize(task, work, at="baseline")
     before = repo_fingerprint(repo)
-    adapter = CodexAdapter()
     t0 = time.time()
     res = adapter.propose(task=task["prompt"], repo=repo, attempt=0, feedback=None,
                           timeout=agent_timeout, target_file=task_module(task),
@@ -511,22 +520,23 @@ def run_arm_no_repair(task: dict, work: Path, arm: str, sentinel, agent_timeout:
 
 
 def run_arm_repair(task: dict, work: Path, sentinel, agent_timeout: int, frozen: dict,
-                   max_attempts: int = 1) -> dict:
+                   adapter, max_attempts: int = 1) -> dict:
     """Arm C: ShipGuard's bounded counterexample-driven repair loop on a REAL project baseline."""
     contract, store = _common(task, work, frozen)
     out_dir = work / f"arm-C-{task['id']}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    return _repair_loop(task, work, contract, store, sentinel, agent_timeout, max_attempts, out_dir)
+    return _repair_loop(task, work, contract, store, sentinel, agent_timeout, max_attempts,
+                        out_dir, adapter)
 
 
-def _repair_loop(task, work, contract, store, sentinel, agent_timeout, max_attempts, out_dir) -> dict:
+def _repair_loop(task, work, contract, store, sentinel, agent_timeout, max_attempts, out_dir,
+                 adapter) -> dict:
     """verify -> authentic counterexample -> fresh repair attempt -> independent re-verification.
 
     Uses the project's genuine pre-fix state as the baseline, so any contradiction is a real
     agent-produced defect against the project's own approved criteria.
     """
     repo = materialize(task, work, at="baseline")
-    adapter = CodexAdapter()
     allowed = task_allowed(task)
     export = task_export(task)
     attempts: list[dict] = []
@@ -951,6 +961,8 @@ def summarize(results: list[dict]) -> dict:
             "arm_A_false_accepts": len(false_accept_a),
             "arm_B_false_accepts": len(false_accept_b),
             "defects_invisible_to_ordinary_tests": len(aspirin_ab),
+            "provider_unavailable": sum(1 for r in ab
+                                        if (r.get("agent") or {}).get("outcome") == "unavailable"),
             "false_accept_task_ids": sorted({r["task"] for r in false_accept_a}),
         },
         "arm_C": {
@@ -971,7 +983,7 @@ def summarize(results: list[dict]) -> dict:
 
 
 def run(agent_timeout: int = 420, only: list[str] | None = None,
-        arms: tuple[str, ...] = ("AB", "C")) -> dict:
+        arms: tuple[str, ...] = ("AB", "C"), agent: str = "codex") -> dict:
     """Execute the frozen corpus. Writes RESULTS incrementally so a crash loses nothing."""
     if not MANIFEST.exists():
         raise SystemExit("manifest not frozen — run `freeze` first")
@@ -981,6 +993,25 @@ def run(agent_timeout: int = 420, only: list[str] | None = None,
     sentinel = find_sentinel()
     if sentinel is None:
         raise SystemExit("sentinel CLI not found (set SHIPGUARD_SENTINEL)")
+
+    # Pre-flight: a live, authenticated provider is mandatory. If it is not usable the benchmark
+    # does not run at all — no offline stand-in, no scripted candidate, no fabricated model output.
+    adapter = _make_adapter(agent)
+    usable, reason = adapter.available()
+    agent_identity = {"name": adapter.name, "mode": adapter.mode, "available": usable,
+                      "availability_reason": reason,
+                      "planned_at_freeze": (manifest.get("agent") or {}).get("name")}
+    if not usable:
+        raise SystemExit(
+            f"REFUSING TO RUN: the {agent} provider is not usable — {reason}\n"
+            "No model activity will be fabricated and no offline/scripted candidate will be "
+            "substituted. Restore the provider (re-authenticate, or wait for the quota reset) and "
+            "re-run; the frozen manifest and corpus are unchanged and remain valid.")
+    if agent_identity["planned_at_freeze"] and agent != agent_identity["planned_at_freeze"]:
+        print(f"NOTE: the manifest planned agent={agent_identity['planned_at_freeze']!r}; this run "
+              f"uses {agent!r}. Corpus, prompts, contracts and oracle are unchanged from the freeze.",
+              flush=True)
+
     tasks = [t for t in TASKS if not only or t["id"] in only]
 
     results: list[dict] = []
@@ -1010,7 +1041,7 @@ def run(agent_timeout: int = 420, only: list[str] | None = None,
                                       check=False).stdout.strip()),
             },
             "arms": ARMS, "arm_pairing": ARM_PAIRING,
-            "agent": manifest.get("agent"), "verifier": manifest.get("verifier"),
+            "agent": agent_identity, "verifier": manifest.get("verifier"),
             "summary": summarize(results), "results": results}),
             indent=2, ensure_ascii=False) + "\n")
 
@@ -1021,9 +1052,9 @@ def run(agent_timeout: int = 420, only: list[str] | None = None,
                 continue
             print(f"[{arm}] {task['id']} …", flush=True)
             if arm == "AB":
-                r = run_arm_no_repair(task, work, "AB", sentinel, agent_timeout, manifest)
+                r = run_arm_no_repair(task, work, "AB", sentinel, agent_timeout, manifest, adapter)
             elif arm == "C":
-                r = run_arm_repair(task, work, sentinel, agent_timeout, manifest)
+                r = run_arm_repair(task, work, sentinel, agent_timeout, manifest, adapter)
             else:
                 raise SystemExit(f"unknown arm {arm!r} (use AB and/or C)")
             r["recorded_at"] = _now()
@@ -1035,6 +1066,19 @@ def run(agent_timeout: int = 420, only: list[str] | None = None,
                   f"status={fin.get('status')} A={r.get('arm_A_decision')} "
                   f"B={r.get('arm_B_decision')} correct={r.get('ground_truth_correct')}", flush=True)
             _flush()
+            # A provider that stops serving mid-run must halt the benchmark, not fill the remaining
+            # cells with empty rows that could later be read as agent failures.
+            outs = [(r.get("agent") or {}).get("outcome")] + [
+                (a.get("agent") or {}).get("outcome") for a in r.get("attempts", [])]
+            if "unavailable" in outs:
+                why = ((r.get("agent") or {}).get("error")
+                       or next((a.get("agent", {}).get("error") for a in r.get("attempts", [])
+                                if (a.get("agent") or {}).get("outcome") == "unavailable"), ""))
+                raise SystemExit(
+                    f"STOPPING: the {agent} provider became unavailable during the run — {why}\n"
+                    f"{len(results)} cell(s) were recorded to {RESULTS.name} before the stop; the "
+                    "rest were NOT run. Nothing was fabricated and no stand-in agent was used. "
+                    "Restore the provider and re-run: already-recorded cells are skipped.")
     _flush()
     return {"results": results, "summary": summarize(results)}
 
@@ -1322,8 +1366,12 @@ if __name__ == "__main__":
     elif cmd == "freeze":
         freeze()
     elif cmd == "run":
+        agent = "codex"
+        if "--agent" in sys.argv:
+            agent = sys.argv[sys.argv.index("--agent") + 1]
         arms = tuple(a.upper() for a in rest if a.upper() in ("AB", "C")) or ("AB", "C")
-        out = run(only=[a for a in rest if a.upper() not in ("AB", "C")] or None, arms=arms)
+        only = [a for a in rest if a.upper() not in ("AB", "C")] or None
+        out = run(only=only, arms=arms, agent=agent)
         print(json.dumps(out["summary"], indent=2))
     elif cmd == "summarize":
         print(json.dumps(summarize(json.loads(RESULTS.read_text())["results"]), indent=2))

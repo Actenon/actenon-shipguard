@@ -19,6 +19,22 @@ _AUTH_FAILURE_MARKERS = (
     "failed to authenticate", "oauth session expired", "not authenticated",
     "login", "unauthorized", "no credentials", "auth",
 )
+# A provider that is reachable and authenticated but refuses to serve is still UNAVAILABLE, not a
+# failed repair. Recording quota exhaustion as `failed` would silently turn "we could not ask the
+# model" into "the model could not fix the defect" — the exact fabrication the design forbids.
+# These are strings the CLI itself emits (note the typographic apostrophe in the real message), so
+# they are matched case-insensitively and only when the model produced no change at all.
+_QUOTA_MARKERS = (
+    "hit your usage limit", "purchase more credits", "insufficient_quota",
+    "quota exceeded", "rate limit exceeded", "too many requests",
+)
+
+
+def _quota_message(combined: str) -> str:
+    for line in combined.splitlines():
+        if any(m in line.lower() for m in _QUOTA_MARKERS):
+            return line.strip()[:300]
+    return ""
 
 
 class CodexAdapter:
@@ -74,6 +90,13 @@ class CodexAdapter:
             return AgentResult(self.name, self.mode, "unavailable", statement, changed, diff,
                                attempt, dur, error="codex authentication failed/expired",
                                raw={"exit": code, "stderr_tail": (err or "")[-400:]})
+        if not changed and any(m in low for m in _QUOTA_MARKERS):
+            return AgentResult(self.name, self.mode, "unavailable", statement, changed, diff,
+                               attempt, dur,
+                               error="codex provider unavailable (usage limit / quota exhausted) — "
+                                     "no model ran, so no repair outcome may be inferred",
+                               raw={"exit": code, "stderr_tail": (err or "")[-400:],
+                                    "provider_message": _quota_message(combined)})
         if code != 0:
             return AgentResult(self.name, self.mode, "failed", statement, changed, diff,
                                attempt, dur, error=f"codex exited {code}",

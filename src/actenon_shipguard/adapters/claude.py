@@ -11,8 +11,9 @@ Security posture (mandate §SECOND):
   * If the CLI is missing, unauthenticated (e.g. expired OAuth), or not consented, the adapter
     reports ``unavailable`` with the exact reason — it NEVER fabricates a change or a success.
 
-NOTE: in the current development environment Claude OAuth is expired, so ``available()`` returns
-False and live Claude execution is honestly disabled. Codex is the authenticated live provider.
+NOTE: ``available()`` is probed at run time, never assumed. An expired OAuth session (seen earlier in
+this project's history) makes it return False with the exact reason, and live execution stays
+honestly disabled until an operator re-authenticates and re-consents.
 """
 from __future__ import annotations
 

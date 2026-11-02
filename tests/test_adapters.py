@@ -83,3 +83,44 @@ def test_offline_adapter_is_labelled_deterministic(tmp_path):
     r = a.propose(task="t", repo=tmp_path, attempt=0, feedback=None, timeout=5)
     assert r.mode == "offline-deterministic"
     assert "NOT a live model repair" in (r.raw.get("NOTE", "") + r.statement)
+
+
+_QUOTA_STDERR = ("ERROR: You\u2019ve hit your usage limit. Visit "
+                 "https://chatgpt.com/settings/usage to purchase more credits or try again at "
+                 "Nov 8th, 2026 1:29 PM.\n")
+
+
+def _stub_codex(monkeypatch, *, exit_code, stdout="", stderr=_QUOTA_STDERR, changed=()):
+    def _run(cmd, cwd, timeout):
+        if "login" in cmd and "status" in cmd:
+            return 0, "Logged in using ChatGPT", "", False
+        return exit_code, stdout, stderr, False
+
+    monkeypatch.setattr(codex_mod, "run_bounded", _run)
+    monkeypatch.setattr(codex_mod, "git_diff", lambda repo: (list(changed), ""))
+
+
+def test_codex_quota_exhaustion_is_unavailable_not_a_failed_repair(tmp_path, monkeypatch):
+    """An exhausted provider means no model ran. Recording that as `failed` would silently turn
+    'we could not ask the model' into 'the model could not fix the defect'."""
+    _stub_codex(monkeypatch, exit_code=1)
+    r = CodexAdapter().propose(task="fix it", repo=tmp_path, attempt=0, feedback=None, timeout=5)
+    assert r.outcome == "unavailable", r.error
+    assert not r.made_change
+    assert "usage limit" in r.error or "quota" in r.error
+    assert "hit your usage limit" in (r.raw or {}).get("provider_message", "")
+
+
+def test_codex_quota_marker_is_ignored_when_the_model_actually_changed_code(tmp_path, monkeypatch):
+    """A task about rate limiting must not be misread as provider exhaustion."""
+    _stub_codex(monkeypatch, exit_code=0, stdout="added a rate limit guard", stderr="",
+                changed=["src/x.ts"])
+    r = CodexAdapter().propose(task="add rate limit handling", repo=tmp_path, attempt=0,
+                               feedback=None, timeout=5)
+    assert r.outcome == "completed" and r.made_change
+
+
+def test_codex_generic_nonzero_exit_is_still_a_failure(tmp_path, monkeypatch):
+    _stub_codex(monkeypatch, exit_code=3, stdout="", stderr="boom: syntax error in candidate")
+    r = CodexAdapter().propose(task="fix it", repo=tmp_path, attempt=0, feedback=None, timeout=5)
+    assert r.outcome == "failed" and "exited 3" in (r.error or "")
