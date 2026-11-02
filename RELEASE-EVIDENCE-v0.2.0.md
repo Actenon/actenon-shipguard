@@ -221,7 +221,7 @@ defect→repair path that this NO-GO turns on.
 | 7 | Apprentice/Howdex/Workproof real **or** explicitly excluded | **MET (excluded)** — see FIFTH |
 | 8 | Historical v0.1.2 security controls still pass | **MET** — 31 tests unchanged within the 51 |
 | 9 | Clean installation reproduces the supported workflow | **MET** — wheel → fresh venv → doctor/demo/run from unrelated cwd |
-| 10 | CI passes against the exact release commit | **PENDING** — branch push + CI (core + sentinel-integration jobs) |
+| 10 | CI passes against the exact release commit | **MET** — CI green on `6d3a6b4` (verify py3.11 + py3.12, and sentinel-integration which clones+builds the pinned Sentinel and runs the real-CLI tests + offline loop): <https://github.com/Actenon/actenon-shipguard/actions/runs/41434274869> |
 | 11 | Every limitation honestly documented | **MET** — this document |
 
 **Decision: NO-GO for publishing v0.2.0.** Conditions 3 and 4 are not satisfied with a live agent, and
@@ -230,9 +230,9 @@ the disciplined outcome the mandate prescribes when a mandatory gate is unmet.
 
 **What would flip this to GO:** a genuine live-agent run on a task hard enough (or a benchmark corpus
 broad enough) that the agent's **own** first attempt is contradicted by real Sentinel and the
-counterexample drives a real repair to independent re-verification — plus CI green on the exact commit.
-The machinery to do this is built and tested; the missing piece is an honest live-agent defect, which
-needs a harder task corpus (SEVENTH), not a code change.
+counterexample drives a real repair to independent re-verification. Every other gate condition is met
+(including CI green on the exact commit); the machinery is built and tested. The single missing piece is
+an honest live-agent defect, which needs a harder task corpus (SEVENTH), **not** a code change.
 
 ---
 
