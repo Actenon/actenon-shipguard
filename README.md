@@ -9,11 +9,15 @@ approved requirements** — and, for explicitly protected operations, a conseque
 must not execute without authority *and* verified correctness.
 
 The **v0.1.2 security-remediation pre-release** is published: the protected-execution trust
-boundary is complete and adversarially tested (31 tests), the enforcer holds **no signing key**,
-and the wheel installs non-editably and runs from an unrelated cwd. **v0.2.0 (the real
-coding-agent repair loop) is in development** on the `v0.2.0` branch. The real-agent loop,
-memory transfer, attestation verification, benchmarks and npm distribution remain **explicit
-release blockers** tracked in [`RELEASE-EVIDENCE.md`](RELEASE-EVIDENCE.md) and
+boundary is complete and adversarially tested (31 tests, still passing unchanged inside the current
+127), the enforcer holds **no signing key**, and the wheel installs non-editably and runs from an
+unrelated cwd. **v0.2.0 (the real coding-agent repair loop) is in development and is NO-GO** on the
+`v0.2.0` branch: its independent real-world benchmark found the live agent was already correct on all
+6 frozen tasks, so there were **0 detections and 0 repairs** to support the "catches what your tests
+miss" claim — see [`BENCHMARK-REPORT-v0.2.0.md`](BENCHMARK-REPORT-v0.2.0.md) and
+[`RELEASE-EVIDENCE-v0.2.0.md`](RELEASE-EVIDENCE-v0.2.0.md). Memory transfer, attestation verification
+and npm distribution remain **explicit release blockers**, tracked in
+[`RELEASE-EVIDENCE.md`](RELEASE-EVIDENCE.md) and
 [`SECURITY-REMEDIATION-v0.1.2.md`](SECURITY-REMEDIATION-v0.1.2.md). Do not mistake the recorded
 PASS output for a v1.0 security guarantee.
 
@@ -74,8 +78,13 @@ actenon-shipguard report --out DIR --open            # render the HTML report
 repair loop) is **implemented and tested on the in-development `v0.2.0` branch**: it drives a real
 agent change, runs ordinary tests, and uses the **real Sentinel verifier** (structured receipts) as the
 independent acceptance authority, feeding a reproducible counterexample back to drive a bounded repair.
-**v0.2.0 is not yet released (NO-GO)** — the live agent produced correct code on the tested tasks, so a
-*live-agent-produced* defect→repair was not demonstrated honestly. See
+**v0.2.0 is not yet released (NO-GO)** — its independent real-world benchmark ran 6 frozen historical
+defects across 3 third-party projects against a live agent, and the agent was **correct on all 6 first
+attempt**: 0 detections, 0 repairs, 0 false accepts in either arm. The verification pipeline worked
+end to end (6/6 independently verified, every committed tree proven byte-identical to the verified
+candidate, every change inside its allowed file), but that is a *verification* result and gives no
+support to a "catches the defects your tests miss" claim, so that claim is not made. See
+[`BENCHMARK-REPORT-v0.2.0.md`](BENCHMARK-REPORT-v0.2.0.md) and
 [`RELEASE-EVIDENCE-v0.2.0.md`](RELEASE-EVIDENCE-v0.2.0.md). On the released **v0.1.2**, `run` still
 reports "not wired" rather than faking success.
 
@@ -119,9 +128,12 @@ and **key-storage isolation** (no private key in the workspace; isolated mode fa
   policy, but it is **not** an unbypassable OS sandbox — a rogue agent that refuses to call the gate
   is not stopped by it. Hard containment needs Actenon airlock Protected Mode + containers.
 - **Mode A — local development repair loop: implemented + tested on the `v0.2.0` branch, not yet
-  released.** Real Sentinel is the acceptance authority; live Codex is authenticated and produced
-  independently-verified fixes; live Claude is disabled (expired OAuth). v0.2.0 is **NO-GO** pending an
-  honest live-agent-produced defect→repair demonstration (see `RELEASE-EVIDENCE-v0.2.0.md`).
+  released.** Real Sentinel is the acceptance authority. Provider availability is probed at run time,
+  never assumed: the benchmark ran on **live Claude Code** (`acceptEdits` + a file-only tool allowlist,
+  no permission-bypass flag) after Codex's usage limit was exhausted; an unavailable provider is
+  recorded as `unavailable` and the run refuses to proceed rather than fabricating model activity.
+  v0.2.0 is **NO-GO**: the benchmark produced 0 detections and 0 repairs because the agent was already
+  correct on all 6 tasks (see `BENCHMARK-REPORT-v0.2.0.md`, `RELEASE-EVIDENCE-v0.2.0.md`).
 - **Mode B — PR protection / GitHub Actions: scaffolded, not validated** (workflow present, unrun).
 
 ## Relationship to the ecosystem

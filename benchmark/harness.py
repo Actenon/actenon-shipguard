@@ -1107,15 +1107,64 @@ def report() -> str:
       f"from those artifacts; none is transcribed by hand.")
     a("")
     a(f"- Run window: {payload.get('started_at')} → {payload.get('finished_at')}")
-    a(f"- Harness: `{manifest['harness']['path']}` sha256 `{manifest['harness']['sha256']}` at git "
-      f"`{manifest['harness']['git_head']}` (dirty={manifest['harness']['git_dirty']})")
+    rh = payload.get("run_harness") or {}
+    a(f"- Harness that RAN this benchmark: `{rh.get('path')}` sha256 `{rh.get('sha256')}` at git "
+      f"`{rh.get('git_head')}` (repo dirty={rh.get('git_dirty')} — the release-evidence document was "
+      f"being edited while the run executed; the harness file itself was committed)")
+    a(f"- Harness that VALIDATED and froze the corpus: `{manifest['harness']['path']}` sha256 "
+      f"`{manifest['harness']['sha256']}` at git `{manifest['harness']['git_head']}` "
+      f"(dirty={manifest['harness']['git_dirty']})")
     v = manifest["verifier"]
     a(f"- Independent oracle: {v['name']} pinned at `{v['pinned_commit']}`, runner "
       f"`{v['runner']}`, vitest {manifest['harness']['vitest_version']}")
+    ran = payload.get("agent") or {}
+    a(f"- Agent that actually ran: **{ran.get('name')}** (mode `{ran.get('mode')}`, "
+      f"availability probe: {ran.get('availability_reason')})")
+    if ran.get("planned_at_freeze") and ran.get("planned_at_freeze") != ran.get("name"):
+        a(f"  - The manifest planned `{ran['planned_at_freeze']}`. That provider was authenticated "
+          f"but its usage limit was exhausted (recorded as `unavailable`, never as a repair "
+          f"failure), so the run used `{ran['name']}`. The corpus, prompts, contracts and oracle "
+          f"are byte-identical to the freeze; only the model differs, and that is disclosed here "
+          f"rather than buried.")
     ag = manifest["agent"]
-    a(f"- Agent: {ag['name']} (sandbox `{ag['sandbox']}`, auth {ag['auth']}; {ag['note']})")
+    a(f"- Agent confinement: sandbox/permission controls per the adapter "
+      f"({ag.get('note')}); no permission-bypass flag is used by any adapter")
     a(f"- Python {manifest['harness']['python']}; dependencies supplied by "
       f"`{manifest['harness']['node_modules_source']}` — no benchmark-time install")
+    a("")
+    a("## 0. Bottom line")
+    a("")
+    ab_, c_ = s["arm_AB"], s["arm_C"]
+    if ab_["defects_invisible_to_ordinary_tests"] == 0 and c_["verified_after_repair"] == 0:
+        a(f"**The live agent solved all {ab_['sessions']} frozen tasks correctly on its first "
+          f"attempt.** The independent oracle VERIFIED {ab_['independently_correct']} of "
+          f"{ab_['sessions']}; the projects' own test suites agreed on every one, so arm A falsely "
+          f"accepted {ab_['arm_A_false_accepts']} change(s) and arm B falsely accepted "
+          f"{ab_['arm_B_false_accepts']}.")
+        a("")
+        a("Consequently **no aspirin instance occurred and no counterexample-driven repair was "
+          "exercised**: there was no case where ordinary tests were green while an independently "
+          "established requirement was violated, so there was nothing for ShipGuard to catch and "
+          "nothing to feed back. This is the measured outcome. The corpus was not expanded, no task "
+          "was weakened, no requirement was hidden, and no prewritten or scripted candidate was "
+          "substituted to manufacture a repair demonstration.")
+        a("")
+        a("What the run *does* establish: on six real historical defects in three independently "
+          f"maintained projects, the full pipeline worked end to end against a live model — "
+          f"{c_['sessions']} of {c_['sessions']} arm-C candidates were independently VERIFIED and "
+          f"every committed tree was proven byte-identical to the verified candidate "
+          f"(tree binding equivalent on {c_['tree_binding_equivalent']} of {c_['sessions']}), with "
+          f"all changes confined to their allowed file. That is a verification result, not a "
+          "detection or repair result, and it is reported as such.")
+    else:
+        a(f"Arm A/B: {ab_['independently_correct']} of {ab_['sessions']} sessions were independently "
+          f"correct; {ab_['defects_invisible_to_ordinary_tests']} had green ordinary tests while the "
+          f"oracle contradicted them; arm A falsely accepted {ab_['arm_A_false_accepts']}, arm B "
+          f"{ab_['arm_B_false_accepts']}.")
+        a("")
+        a(f"Arm C: {c_['verified']} of {c_['sessions']} reached `verified`, of which "
+          f"{c_['verified_after_repair']} required at least one counterexample-driven repair "
+          f"({', '.join('`%s`' % t for t in c_['repaired_task_ids']) or 'none'}).")
     a("")
     a("## 1. Question asked")
     a("")
@@ -1311,8 +1360,11 @@ def report() -> str:
     a("")
     a("- No statistical reliability claim. The corpus is small and was not sampled from a population "
       "of real agent tasks; rates are descriptive counts, not estimates with confidence intervals.")
-    a("- No comparison against a second coding agent. Only Codex was authenticated; Claude Code's "
-      "OAuth token was expired, so live Claude execution was disabled rather than simulated.")
+    a(f"- No comparison against a second coding agent. This run used **{ran.get('name')}** only. "
+      f"{('Codex CLI was authenticated but its usage limit was exhausted until 2026-11-08, so no '
+         'cross-model comparison was possible; that state was recorded as provider `unavailable`, '
+         'never as an agent failure.') if ran.get('name') == 'claude' else 'Claude Code was not usable for this run.'} "
+      "A single model on a small corpus cannot support any claim about coding agents in general.")
     a("- No hostile-agent containment claim. The runner is `local-advisory` under the same OS "
       "account, which Sentinel itself states is not a security boundary.")
     a("- No claim about tasks whose correct fix changes an existing assertion. Sentinel's mandatory "

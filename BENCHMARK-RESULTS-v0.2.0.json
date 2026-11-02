@@ -1,0 +1,1428 @@
+{
+  "schema": "shipguard/benchmark-results/v1",
+  "started_at": "2026-11-02T13:43:39.012699Z",
+  "finished_at": "2026-11-02T13:53:04.739819Z",
+  "manifest_sha256": "a380a1b7f30756d5af3026a94ec3f33f996d888f6819e048341ab0465c36d6cc",
+  "run_harness": {
+    "path": "benchmark/harness.py",
+    "sha256": "af6c49d6f938d5851805271d2ddd9c7697382eecf54a3fbf047a79cd39976157",
+    "git_head": "9bbe0f76a7cba467fad75763484bd23b96b5c6d1",
+    "git_dirty": true
+  },
+  "arms": {
+    "A": "ordinary Codex + the project's own tests only (no independent verification)",
+    "B": "same Codex configuration + independent Sentinel verification, no automatic repair",
+    "C": "same Codex configuration + ShipGuard bounded counterexample-driven repair"
+  },
+  "arm_pairing": "Arms A and B are evaluated on ONE shared agent session per task, recorded as arm 'AB'. Arm B adds only a verification GATE and gives the agent no feedback, so by construction the agent's behaviour in A and B is identical; running two sessions would double the cost and add independent sampling noise to a comparison that is meant to be paired. Each AB record therefore carries both decision rules — arm_A_decision (accept iff the project's own tests pass) and arm_B_decision (accept iff the independent oracle verifies) — applied to the same measured output, plus ground_truth_correct from the oracle. Arm C is a separate session because it feeds counterexamples back to the agent.",
+  "agent": {
+    "name": "claude",
+    "mode": "live",
+    "available": true,
+    "availability_reason": "claude CLI present, authenticated, and live execution consented",
+    "planned_at_freeze": "codex"
+  },
+  "verifier": {
+    "name": "sentinel-verified",
+    "pinned_commit": "becba502c8dbebdd5e52b8ca09122f86e4e37bb3",
+    "runner": "local (advisory, same OS account — not a security boundary)"
+  },
+  "summary": {
+    "tasks_in_corpus": 6,
+    "projects": [
+      "entities",
+      "scule",
+      "ufo"
+    ],
+    "arm_AB": {
+      "sessions": 6,
+      "agent_made_a_change": 6,
+      "ordinarily_green": 6,
+      "independently_correct": 6,
+      "arm_A_accepted": {
+        "n": 6,
+        "count": 6,
+        "rate": 1.0
+      },
+      "arm_B_accepted": {
+        "n": 6,
+        "count": 6,
+        "rate": 1.0
+      },
+      "arm_A_false_accepts": 0,
+      "arm_B_false_accepts": 0,
+      "defects_invisible_to_ordinary_tests": 0,
+      "provider_unavailable": 0,
+      "false_accept_task_ids": []
+    },
+    "arm_C": {
+      "sessions": 6,
+      "verified": 6,
+      "verified_after_repair": 0,
+      "repaired_task_ids": [],
+      "contradicted_after_budget": 0,
+      "aspirin_on_first_attempt": 0,
+      "tree_binding_equivalent": 6,
+      "statuses": [
+        "verified"
+      ],
+      "agent_seconds_total": 250.76,
+      "verification_seconds_total": 31.85
+    }
+  },
+  "results": [
+    {
+      "arm": "AB",
+      "task": "scule-custom-separator-split",
+      "project": "scule",
+      "agent": {
+        "outcome": "completed",
+        "duration_s": 25.98,
+        "changed_files": [
+          "src/index.ts"
+        ],
+        "statement": "and, and they should still pass.\n\n```ts\nreturn char !== char.toLowerCase();   // was: char.toUpperCase() === char\n```\n\n**Cause:** the old check treated any character that has no uppercase form as uppercase, because `'-'.toUpperCase() === '-'`. When `-` wasn't a separator, it looked like a lowercase-to-uppercase boundary, giving `['new', '-name', '-value']`. Now a character only counts as uppercase if it actually has a lowercase form, so punctuation and uncased characters such as CJK count as lowercase.\n\n**Behaviour to be aware of:**\n- **Digits:** they still return `undefined` rather than `fals",
+        "error": null,
+        "tokens": null,
+        "mode": "live"
+      },
+      "wallclock_s": 28.77,
+      "ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m57 passed\u001b[39m\u001b[22m\u001b[90m (57)\u001b[39m"
+      },
+      "independent_verification": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "receipt_hash": "b21606d5b2e5dfcee557325e8d2e5cf49e979709e7d4df8a60342c0016f49828",
+        "requirements": {
+          "custom-separator-no-split": "VERIFIED",
+          "preserve-default-splitting": "VERIFIED"
+        },
+        "counterexample": null,
+        "reasons": [],
+        "attempt_id": "AB-cc0fe4"
+      },
+      "arm_A_decision": "accept",
+      "arm_B_decision": "accept",
+      "ground_truth_correct": true,
+      "baseline_head": "6b0f226178b541827ec79852df297e8a8d133f3b",
+      "candidate_head": "6b0f226178b541827ec79852df297e8a8d133f3b",
+      "diff_lines": 13,
+      "recorded_at": "2026-11-02T13:44:10.998859Z"
+    },
+    {
+      "arm": "C",
+      "task": "scule-custom-separator-split",
+      "project": "scule",
+      "attempts": [
+        {
+          "attempt": 0,
+          "agent": {
+            "outcome": "completed",
+            "duration_s": 35.33,
+            "changed_files": [
+              "src/index.ts"
+            ],
+            "statement": "e results should change.\n\n**The bug:** `isUppercase` in `src/index.ts:19` checked `char.toUpperCase() === char`, which is true for anything without case, so `-` counted as uppercase. That created a false case boundary at each `-` when it wasn't a separator.\n\n**The fix:** the check is now `char !== char.toLowerCase()`, so only real uppercase letters count as uppercase and punctuation counts as lowercase.\n\n**Behaviours to be aware of:**\n- **Digits:** they still return `undefined` from `isUppercase`, not `false`. I left this because they already never cause a split, whereas treating them as lower",
+            "error": null,
+            "tokens": null
+          },
+          "scope": {
+            "changed": [
+              "src/index.ts"
+            ],
+            "allowed_paths": [
+              "src/index.ts"
+            ],
+            "in_scope": [
+              "src/index.ts"
+            ],
+            "out_of_scope": [],
+            "test_changes": [],
+            "dependency_changes": [],
+            "clean": true
+          },
+          "ordinary_tests": {
+            "ran": true,
+            "passed": true,
+            "runner": "npm-test",
+            "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m57 passed\u001b[39m\u001b[22m\u001b[90m (57)\u001b[39m"
+          },
+          "verification": {
+            "ok": true,
+            "verdict": "VERIFIED",
+            "receipt_hash": "6eae3e80d5ee97f1112ef75d96b739baf81760c6d0da96f9824a68b078d895b6",
+            "requirements": {
+              "custom-separator-no-split": "VERIFIED",
+              "preserve-default-splitting": "VERIFIED"
+            },
+            "counterexample": null,
+            "reasons": [],
+            "attempt_id": "C-0-ba051c",
+            "integrity": {
+              "pointer_before": null,
+              "pointer_after": "6eae3e80d5ee97f1112ef75d96b739baf81760c6d0da96f9824a68b078d895b6",
+              "fresh_receipt": true,
+              "receipt_content_address_ok": true,
+              "referenced_objects_ok": true,
+              "candidate_identity": {
+                "files_checked": 19,
+                "files_hash_matched": [
+                  ".editorconfig",
+                  ".eslintignore",
+                  ".eslintrc",
+                  ".github/banner.svg",
+                  ".github/workflows/autofix.yml",
+                  ".github/workflows/ci.yml",
+                  ".gitignore",
+                  ".prettierrc",
+                  "CHANGELOG.md",
+                  "LICENSE",
+                  "package.json",
+                  "pnpm-lock.yaml",
+                  "README.md",
+                  "renovate.json",
+                  "src/index.ts",
+                  "src/types.ts",
+                  "test/scule.test.ts",
+                  "test/types.test-d.ts",
+                  "tsconfig.json"
+                ],
+                "files_mismatched": [],
+                "files_missing": []
+              },
+              "snapshot_git_head_matches_receipt": true,
+              "change_scope": {
+                "allowed_paths": [
+                  "src/index.ts"
+                ],
+                "changes": [
+                  {
+                    "path": "src/index.ts",
+                    "kind": "modified",
+                    "classification": "VERIFIED",
+                    "reason": "Path authorised by the supplied contract; behaviour is checked separately"
+                  }
+                ],
+                "out_of_scope": [],
+                "unauthorised_classification": [],
+                "test_changes": [],
+                "dependency_changes": []
+              },
+              "exit_code": 0,
+              "attempt_id": "C-0-ba051c"
+            }
+          },
+          "committed_head": "b6b815b6024ed59c66b05e4c74ca2e212632d755",
+          "tree_binding": {
+            "commit": "b6b815b6024ed59c66b05e4c74ca2e212632d755",
+            "receipt_hash": "6eae3e80d5ee97f1112ef75d96b739baf81760c6d0da96f9824a68b078d895b6",
+            "candidate_hash": "a42fee43544dfb3fc457be38629c1cb5025cde51913dd3991bb440b596e7f6e2",
+            "files_checked": 19,
+            "files_matched": [
+              ".editorconfig",
+              ".eslintignore",
+              ".eslintrc",
+              ".github/banner.svg",
+              ".github/workflows/autofix.yml",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              ".prettierrc",
+              "CHANGELOG.md",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "src/index.ts",
+              "src/types.ts",
+              "test/scule.test.ts",
+              "test/types.test-d.ts",
+              "tsconfig.json"
+            ],
+            "mismatches": [],
+            "equivalent": true,
+            "method": "sha256(git show <commit>:<path>) == candidateSnapshot.files[path].hash"
+          }
+        }
+      ],
+      "final": {
+        "status": "verified",
+        "repair_attempts_used": 0,
+        "tree_binding_equivalent": true
+      },
+      "agent_seconds": 38.83,
+      "verification_seconds": 2.42,
+      "independent_verification": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "receipt_hash": "6eae3e80d5ee97f1112ef75d96b739baf81760c6d0da96f9824a68b078d895b6",
+        "requirements": {
+          "custom-separator-no-split": "VERIFIED",
+          "preserve-default-splitting": "VERIFIED"
+        },
+        "counterexample": null
+      },
+      "ground_truth_correct": true,
+      "candidate_head": "b6b815b6024ed59c66b05e4c74ca2e212632d755",
+      "recorded_at": "2026-11-02T13:44:53.111530Z"
+    },
+    {
+      "arm": "AB",
+      "task": "ufo-withoutbase-leading-slashes",
+      "project": "ufo",
+      "agent": {
+        "outcome": "completed",
+        "duration_s": 27.99,
+        "changed_files": [
+          "src/utils.ts"
+        ],
+        "statement": "`withoutBase` now collapses any run of leading slashes after stripping the base, so `withoutBase(\"/legacy//evil.com\", \"/legacy\")` returns `/evil.com`. The fix is one line in `src/utils.ts:332`, plus a short comment. I couldn't run the tests because this session has no shell. I traced the existing `withoutBase` cases by reading them, and their expected output doesn't change.\n\n**Paths that can still produce an unsafe result:**\n- **Backslashes:** `withoutBase(\"/legacy/\\\\evil.com\", \"/legacy\")` returns `/\\evil.com`, and browsers treat that the same as `//evil.com`. The repo's own `PROTOCOL_RELATIVE",
+        "error": null,
+        "tokens": null,
+        "mode": "live"
+      },
+      "wallclock_s": 30.67,
+      "ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m485 passed\u001b[39m\u001b[22m\u001b[90m (485)\u001b[39m"
+      },
+      "independent_verification": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "receipt_hash": "f5389516a3bed754d68d44efaf183bd141f5ebd8bf40ffad955d91c4e869c315",
+        "requirements": {
+          "collapse-leading-slashes": "VERIFIED"
+        },
+        "counterexample": null,
+        "reasons": [],
+        "attempt_id": "AB-a5c3e3"
+      },
+      "arm_A_decision": "accept",
+      "arm_B_decision": "accept",
+      "ground_truth_correct": true,
+      "baseline_head": "6df79b930c0eef151111b7290a602d5a118f35f4",
+      "candidate_head": "6df79b930c0eef151111b7290a602d5a118f35f4",
+      "diff_lines": 14,
+      "recorded_at": "2026-11-02T13:45:31.419174Z"
+    },
+    {
+      "arm": "C",
+      "task": "ufo-withoutbase-leading-slashes",
+      "project": "ufo",
+      "attempts": [
+        {
+          "attempt": 0,
+          "agent": {
+            "outcome": "completed",
+            "duration_s": 39.78,
+            "changed_files": [
+              "src/utils.ts"
+            ],
+            "statement": "d. I traced the existing `withoutBase` test cases by hand. None has a double leading slash, so they should be unaffected.\n\n- **The change:** I added a `MULTIPLE_LEADING_SLASHES_RE` constant and applied it to the stripped remainder.\n- **Passthrough cases are collapsed too:** you asked that the result never begin with multiple slashes, so I also applied it where the input comes back unstripped. That means `withoutBase(\"//evil.com\", \"/\")` and `withoutBase(\"//evil.com\", \"/legacy\")` now return `/evil.com`. This is a small behaviour change for inputs that were previously returned as they came in.\n- ",
+            "error": null,
+            "tokens": null
+          },
+          "scope": {
+            "changed": [
+              "src/utils.ts"
+            ],
+            "allowed_paths": [
+              "src/utils.ts"
+            ],
+            "in_scope": [
+              "src/utils.ts"
+            ],
+            "out_of_scope": [],
+            "test_changes": [],
+            "dependency_changes": [],
+            "clean": true
+          },
+          "ordinary_tests": {
+            "ran": true,
+            "passed": true,
+            "runner": "npm-test",
+            "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m485 passed\u001b[39m\u001b[22m\u001b[90m (485)\u001b[39m"
+          },
+          "verification": {
+            "ok": true,
+            "verdict": "VERIFIED",
+            "receipt_hash": "bcd85e96e0b500b88b85f95ad7d4f10152dac3a255dd82513c17011bc30c7678",
+            "requirements": {
+              "collapse-leading-slashes": "VERIFIED"
+            },
+            "counterexample": null,
+            "reasons": [],
+            "attempt_id": "C-0-7cf8f0",
+            "integrity": {
+              "pointer_before": null,
+              "pointer_after": "bcd85e96e0b500b88b85f95ad7d4f10152dac3a255dd82513c17011bc30c7678",
+              "fresh_receipt": true,
+              "receipt_content_address_ok": true,
+              "referenced_objects_ok": true,
+              "candidate_identity": {
+                "files_checked": 39,
+                "files_hash_matched": [
+                  ".editorconfig",
+                  ".github/banner.svg",
+                  ".github/workflows/autofix.yml",
+                  ".github/workflows/ci.yml",
+                  ".gitignore",
+                  ".prettierrc",
+                  "CHANGELOG.md",
+                  "eslint.config.mjs",
+                  "LICENSE",
+                  "package.json",
+                  "pnpm-lock.yaml",
+                  "README.md",
+                  "renovate.json",
+                  "SECURITY.md",
+                  "src/encoding.ts",
+                  "src/index.ts",
+                  "src/parse.ts",
+                  "src/punycode.ts",
+                  "src/query.ts",
+                  "src/url.ts",
+                  "src/utils.ts",
+                  "test/base.test.ts",
+                  "test/double-slash.test.ts",
+                  "test/encoding.test.ts",
+                  "test/fixture/README.md",
+                  "test/fixture/toascii.json",
+                  "test/fixture/urltestdata.json",
+                  "test/is-same.test.ts",
+                  "test/join.test.ts",
+                  "test/normalize.test.ts",
+                  "test/parse.test.ts",
+                  "test/punycode.test.ts",
+                  "test/query.test.ts",
+                  "test/resolve.test.ts",
+                  "test/trailing-slash.test.ts",
+                  "test/types.test-d.ts",
+                  "test/url.test.ts",
+                  "test/utilities.test.ts",
+                  "tsconfig.json"
+                ],
+                "files_mismatched": [],
+                "files_missing": []
+              },
+              "snapshot_git_head_matches_receipt": true,
+              "change_scope": {
+                "allowed_paths": [
+                  "src/utils.ts"
+                ],
+                "changes": [
+                  {
+                    "path": "src/utils.ts",
+                    "kind": "modified",
+                    "classification": "VERIFIED",
+                    "reason": "Path authorised by the supplied contract; behaviour is checked separately"
+                  }
+                ],
+                "out_of_scope": [],
+                "unauthorised_classification": [],
+                "test_changes": [],
+                "dependency_changes": []
+              },
+              "exit_code": 0,
+              "attempt_id": "C-0-7cf8f0"
+            }
+          },
+          "committed_head": "767f6ddea00dbe0e70a0810c743f5d6feab1423e",
+          "tree_binding": {
+            "commit": "767f6ddea00dbe0e70a0810c743f5d6feab1423e",
+            "receipt_hash": "bcd85e96e0b500b88b85f95ad7d4f10152dac3a255dd82513c17011bc30c7678",
+            "candidate_hash": "87f02f8f9a7623c593a1ce372902ef985e01c341a4a91ef8c92d8fbab2a99c51",
+            "files_checked": 39,
+            "files_matched": [
+              ".editorconfig",
+              ".github/banner.svg",
+              ".github/workflows/autofix.yml",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              ".prettierrc",
+              "CHANGELOG.md",
+              "eslint.config.mjs",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "SECURITY.md",
+              "src/encoding.ts",
+              "src/index.ts",
+              "src/parse.ts",
+              "src/punycode.ts",
+              "src/query.ts",
+              "src/url.ts",
+              "src/utils.ts",
+              "test/base.test.ts",
+              "test/double-slash.test.ts",
+              "test/encoding.test.ts",
+              "test/fixture/README.md",
+              "test/fixture/toascii.json",
+              "test/fixture/urltestdata.json",
+              "test/is-same.test.ts",
+              "test/join.test.ts",
+              "test/normalize.test.ts",
+              "test/parse.test.ts",
+              "test/punycode.test.ts",
+              "test/query.test.ts",
+              "test/resolve.test.ts",
+              "test/trailing-slash.test.ts",
+              "test/types.test-d.ts",
+              "test/url.test.ts",
+              "test/utilities.test.ts",
+              "tsconfig.json"
+            ],
+            "mismatches": [],
+            "equivalent": true,
+            "method": "sha256(git show <commit>:<path>) == candidateSnapshot.files[path].hash"
+          }
+        }
+      ],
+      "final": {
+        "status": "verified",
+        "repair_attempts_used": 0,
+        "tree_binding_equivalent": true
+      },
+      "agent_seconds": 42.49,
+      "verification_seconds": 6.37,
+      "independent_verification": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "receipt_hash": "bcd85e96e0b500b88b85f95ad7d4f10152dac3a255dd82513c17011bc30c7678",
+        "requirements": {
+          "collapse-leading-slashes": "VERIFIED"
+        },
+        "counterexample": null
+      },
+      "ground_truth_correct": true,
+      "candidate_head": "767f6ddea00dbe0e70a0810c743f5d6feab1423e",
+      "recorded_at": "2026-11-02T13:46:21.555452Z"
+    },
+    {
+      "arm": "AB",
+      "task": "ufo-false-prefix-match",
+      "project": "ufo",
+      "agent": {
+        "outcome": "completed",
+        "duration_s": 21.31,
+        "changed_files": [
+          "src/utils.ts"
+        ],
+        "statement": "`withBase` and `withoutBase` now match the base only at a real path-segment boundary, but I couldn't run the tests because this session has no shell. I traced the existing `test/base.test.ts` cases by hand and they should still pass.\n\nI added a small private helper, `hasBasePrefix(input, base)`, in `src/utils.ts`, and both functions use it instead of `startsWith`. It counts as a match only if the input starts with the base and the next character is the end of the string, `/`, `?` or `#`.\n\n| Call | Before | After |\n|---|---|---|\n| `withBase('/admin-dashboard', '/admin/')` | `/admin-dashboard` |",
+        "error": null,
+        "tokens": null,
+        "mode": "live"
+      },
+      "wallclock_s": 24.22,
+      "ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m477 passed\u001b[39m\u001b[22m\u001b[90m (477)\u001b[39m"
+      },
+      "independent_verification": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "receipt_hash": "b1d100d14f66f5f3102aaecfb2664aa549dd32b7e8b90e82bef19e26c2f76ff2",
+        "requirements": {
+          "withbase-segment-boundary": "VERIFIED",
+          "withoutbase-segment-boundary": "VERIFIED"
+        },
+        "counterexample": null,
+        "reasons": [],
+        "attempt_id": "AB-aa8fff"
+      },
+      "arm_A_decision": "accept",
+      "arm_B_decision": "accept",
+      "ground_truth_correct": true,
+      "baseline_head": "abfa5882029cc07761aaf7b042f936d5ba002f78",
+      "candidate_head": "abfa5882029cc07761aaf7b042f936d5ba002f78",
+      "diff_lines": 37,
+      "recorded_at": "2026-11-02T13:46:53.358902Z"
+    },
+    {
+      "arm": "C",
+      "task": "ufo-false-prefix-match",
+      "project": "ufo",
+      "attempts": [
+        {
+          "attempt": 0,
+          "agent": {
+            "outcome": "completed",
+            "duration_s": 19.9,
+            "changed_files": [
+              "src/utils.ts"
+            ],
+            "statement": "`withBase` and `withoutBase` now match the base only at a real path-segment boundary. I haven't run the code or the tests, because this session has no way to execute anything. I only traced the cases below by hand.\n\nThe fix is a small private helper, `hasBasePrefix(input, base)`, in `src/utils.ts`, which both functions now use instead of `input.startsWith(_base)`. It requires the character right after the base to be the end of the string, `/`, `?` or `#`.\n\n- **New behaviour:** `withBase('/admin-dashboard', '/admin/')` gives `/admin/admin-dashboard`, and `withoutBase('/admin-dashboard', '/admin",
+            "error": null,
+            "tokens": null
+          },
+          "scope": {
+            "changed": [
+              "src/utils.ts"
+            ],
+            "allowed_paths": [
+              "src/utils.ts"
+            ],
+            "in_scope": [
+              "src/utils.ts"
+            ],
+            "out_of_scope": [],
+            "test_changes": [],
+            "dependency_changes": [],
+            "clean": true
+          },
+          "ordinary_tests": {
+            "ran": true,
+            "passed": true,
+            "runner": "npm-test",
+            "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m477 passed\u001b[39m\u001b[22m\u001b[90m (477)\u001b[39m"
+          },
+          "verification": {
+            "ok": true,
+            "verdict": "VERIFIED",
+            "receipt_hash": "3aacd16c50b19b0b7a64a890cf32af772612e3161fca91d4227d01678d7d120e",
+            "requirements": {
+              "withbase-segment-boundary": "VERIFIED",
+              "withoutbase-segment-boundary": "VERIFIED"
+            },
+            "counterexample": null,
+            "reasons": [],
+            "attempt_id": "C-0-5209c5",
+            "integrity": {
+              "pointer_before": null,
+              "pointer_after": "3aacd16c50b19b0b7a64a890cf32af772612e3161fca91d4227d01678d7d120e",
+              "fresh_receipt": true,
+              "receipt_content_address_ok": true,
+              "referenced_objects_ok": true,
+              "candidate_identity": {
+                "files_checked": 39,
+                "files_hash_matched": [
+                  ".editorconfig",
+                  ".github/banner.svg",
+                  ".github/workflows/autofix.yml",
+                  ".github/workflows/ci.yml",
+                  ".gitignore",
+                  ".prettierrc",
+                  "CHANGELOG.md",
+                  "eslint.config.mjs",
+                  "LICENSE",
+                  "package.json",
+                  "pnpm-lock.yaml",
+                  "README.md",
+                  "renovate.json",
+                  "SECURITY.md",
+                  "src/encoding.ts",
+                  "src/index.ts",
+                  "src/parse.ts",
+                  "src/punycode.ts",
+                  "src/query.ts",
+                  "src/url.ts",
+                  "src/utils.ts",
+                  "test/base.test.ts",
+                  "test/double-slash.test.ts",
+                  "test/encoding.test.ts",
+                  "test/fixture/README.md",
+                  "test/fixture/toascii.json",
+                  "test/fixture/urltestdata.json",
+                  "test/is-same.test.ts",
+                  "test/join.test.ts",
+                  "test/normalize.test.ts",
+                  "test/parse.test.ts",
+                  "test/punycode.test.ts",
+                  "test/query.test.ts",
+                  "test/resolve.test.ts",
+                  "test/trailing-slash.test.ts",
+                  "test/types.test-d.ts",
+                  "test/url.test.ts",
+                  "test/utilities.test.ts",
+                  "tsconfig.json"
+                ],
+                "files_mismatched": [],
+                "files_missing": []
+              },
+              "snapshot_git_head_matches_receipt": true,
+              "change_scope": {
+                "allowed_paths": [
+                  "src/utils.ts"
+                ],
+                "changes": [
+                  {
+                    "path": "src/utils.ts",
+                    "kind": "modified",
+                    "classification": "VERIFIED",
+                    "reason": "Path authorised by the supplied contract; behaviour is checked separately"
+                  }
+                ],
+                "out_of_scope": [],
+                "unauthorised_classification": [],
+                "test_changes": [],
+                "dependency_changes": []
+              },
+              "exit_code": 0,
+              "attempt_id": "C-0-5209c5"
+            }
+          },
+          "committed_head": "ff9f8758be4eb4e797b9d878b84489a33c3bd24b",
+          "tree_binding": {
+            "commit": "ff9f8758be4eb4e797b9d878b84489a33c3bd24b",
+            "receipt_hash": "3aacd16c50b19b0b7a64a890cf32af772612e3161fca91d4227d01678d7d120e",
+            "candidate_hash": "76aca9ffb9a8c5faf943a37ebeb99ca93f937b1c4e41db0bd1505c658edeca71",
+            "files_checked": 39,
+            "files_matched": [
+              ".editorconfig",
+              ".github/banner.svg",
+              ".github/workflows/autofix.yml",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              ".prettierrc",
+              "CHANGELOG.md",
+              "eslint.config.mjs",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "SECURITY.md",
+              "src/encoding.ts",
+              "src/index.ts",
+              "src/parse.ts",
+              "src/punycode.ts",
+              "src/query.ts",
+              "src/url.ts",
+              "src/utils.ts",
+              "test/base.test.ts",
+              "test/double-slash.test.ts",
+              "test/encoding.test.ts",
+              "test/fixture/README.md",
+              "test/fixture/toascii.json",
+              "test/fixture/urltestdata.json",
+              "test/is-same.test.ts",
+              "test/join.test.ts",
+              "test/normalize.test.ts",
+              "test/parse.test.ts",
+              "test/punycode.test.ts",
+              "test/query.test.ts",
+              "test/resolve.test.ts",
+              "test/trailing-slash.test.ts",
+              "test/types.test-d.ts",
+              "test/url.test.ts",
+              "test/utilities.test.ts",
+              "tsconfig.json"
+            ],
+            "mismatches": [],
+            "equivalent": true,
+            "method": "sha256(git show <commit>:<path>) == candidateSnapshot.files[path].hash"
+          }
+        }
+      ],
+      "final": {
+        "status": "verified",
+        "repair_attempts_used": 0,
+        "tree_binding_equivalent": true
+      },
+      "agent_seconds": 22.78,
+      "verification_seconds": 6.6,
+      "independent_verification": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "receipt_hash": "3aacd16c50b19b0b7a64a890cf32af772612e3161fca91d4227d01678d7d120e",
+        "requirements": {
+          "withbase-segment-boundary": "VERIFIED",
+          "withoutbase-segment-boundary": "VERIFIED"
+        },
+        "counterexample": null
+      },
+      "ground_truth_correct": true,
+      "candidate_head": "ff9f8758be4eb4e797b9d878b84489a33c3bd24b",
+      "recorded_at": "2026-11-02T13:47:24.064011Z"
+    },
+    {
+      "arm": "AB",
+      "task": "scule-splitbycase-numbers",
+      "project": "scule",
+      "agent": {
+        "outcome": "completed",
+        "duration_s": 54.38,
+        "changed_files": [
+          "src/index.ts"
+        ],
+        "statement": "ouldn't run the tests or the type checker** because this session has no shell, so I only traced the examples below by hand.\n\nThe bug was that `isUppercase('1')` returns true, so every digit looked like an uppercase letter.\n\n- **Digits carry the previous case:** a digit now takes on the case of the letter before it, so it can't start a rising or falling edge. `isUppercase` itself is unchanged.\n- **Uppercase-to-lowercase splits:** this split moves the last character of the buffer into the next word. It now skips that step when the last character is a digit, so `'FOO1bar'` stays whole instead of ",
+        "error": null,
+        "tokens": null,
+        "mode": "live"
+      },
+      "wallclock_s": 57.15,
+      "ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m27 passed\u001b[39m\u001b[22m\u001b[90m (27)\u001b[39m"
+      },
+      "independent_verification": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "receipt_hash": "79728dcd11782506e47df389cfc025573a76f83445e8b7cde7152ec364cdf275",
+        "requirements": {
+          "digits-are-not-case-changes": "VERIFIED",
+          "preserve-letter-splitting": "VERIFIED"
+        },
+        "counterexample": null,
+        "reasons": [],
+        "attempt_id": "AB-3629c6"
+      },
+      "arm_A_decision": "accept",
+      "arm_B_decision": "accept",
+      "ground_truth_correct": true,
+      "baseline_head": "df4e19e1352dfb74b1d07be01bc0cbf37e574ec2",
+      "candidate_head": "df4e19e1352dfb74b1d07be01bc0cbf37e574ec2",
+      "diff_lines": 33,
+      "recorded_at": "2026-11-02T13:48:24.243367Z"
+    },
+    {
+      "arm": "C",
+      "task": "scule-splitbycase-numbers",
+      "project": "scule",
+      "attempts": [
+        {
+          "attempt": 0,
+          "agent": {
+            "outcome": "completed",
+            "duration_s": 40.01,
+            "changed_files": [
+              "src/index.ts"
+            ],
+            "statement": " no way to run code in this session, so neither the tests nor the type-check have been run. I traced the logic by hand instead.\n\n**The cause:** `isUppercase('1')` returned `true`, because `'1'.toUpperCase() === '1'`. The digit looked like an uppercase letter, so `foo123` split into `foo` and `123`.\n\n**The fix:** digits now get a neutral case value of `null` inside `splitByCase`, so neither the rising nor the falling case check fires on them. Strings with no digits follow exactly the same path as before, so the existing `splitByCase` test cases are unaffected. The exported `isUppercase` is unch",
+            "error": null,
+            "tokens": null
+          },
+          "scope": {
+            "changed": [
+              "src/index.ts"
+            ],
+            "allowed_paths": [
+              "src/index.ts"
+            ],
+            "in_scope": [
+              "src/index.ts"
+            ],
+            "out_of_scope": [],
+            "test_changes": [],
+            "dependency_changes": [],
+            "clean": true
+          },
+          "ordinary_tests": {
+            "ran": true,
+            "passed": true,
+            "runner": "npm-test",
+            "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m27 passed\u001b[39m\u001b[22m\u001b[90m (27)\u001b[39m"
+          },
+          "verification": {
+            "ok": true,
+            "verdict": "VERIFIED",
+            "receipt_hash": "fa5c523fc0ba013a87ecf49ead9c3d8e2d70c343056fef96d07963521723e259",
+            "requirements": {
+              "digits-are-not-case-changes": "VERIFIED",
+              "preserve-letter-splitting": "VERIFIED"
+            },
+            "counterexample": null,
+            "reasons": [],
+            "attempt_id": "C-0-b50698",
+            "integrity": {
+              "pointer_before": null,
+              "pointer_after": "fa5c523fc0ba013a87ecf49ead9c3d8e2d70c343056fef96d07963521723e259",
+              "fresh_receipt": true,
+              "receipt_content_address_ok": true,
+              "referenced_objects_ok": true,
+              "candidate_identity": {
+                "files_checked": 15,
+                "files_hash_matched": [
+                  ".editorconfig",
+                  ".eslintignore",
+                  ".eslintrc",
+                  ".github/banner.svg",
+                  ".github/workflows/ci.yml",
+                  ".gitignore",
+                  "CHANGELOG.md",
+                  "LICENSE",
+                  "package.json",
+                  "pnpm-lock.yaml",
+                  "README.md",
+                  "renovate.json",
+                  "src/index.ts",
+                  "test/scule.test.ts",
+                  "tsconfig.json"
+                ],
+                "files_mismatched": [],
+                "files_missing": []
+              },
+              "snapshot_git_head_matches_receipt": true,
+              "change_scope": {
+                "allowed_paths": [
+                  "src/index.ts"
+                ],
+                "changes": [
+                  {
+                    "path": "src/index.ts",
+                    "kind": "modified",
+                    "classification": "VERIFIED",
+                    "reason": "Path authorised by the supplied contract; behaviour is checked separately"
+                  }
+                ],
+                "out_of_scope": [],
+                "unauthorised_classification": [],
+                "test_changes": [],
+                "dependency_changes": []
+              },
+              "exit_code": 0,
+              "attempt_id": "C-0-b50698"
+            }
+          },
+          "committed_head": "b5e21bcc9a115e0267030e1ca39a6fa66a5623d0",
+          "tree_binding": {
+            "commit": "b5e21bcc9a115e0267030e1ca39a6fa66a5623d0",
+            "receipt_hash": "fa5c523fc0ba013a87ecf49ead9c3d8e2d70c343056fef96d07963521723e259",
+            "candidate_hash": "bea3cd8555816a3feb872576f24424c2a3211e0c71a7586e8331cc8fc3f6520e",
+            "files_checked": 15,
+            "files_matched": [
+              ".editorconfig",
+              ".eslintignore",
+              ".eslintrc",
+              ".github/banner.svg",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              "CHANGELOG.md",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "src/index.ts",
+              "test/scule.test.ts",
+              "tsconfig.json"
+            ],
+            "mismatches": [],
+            "equivalent": true,
+            "method": "sha256(git show <commit>:<path>) == candidateSnapshot.files[path].hash"
+          }
+        }
+      ],
+      "final": {
+        "status": "verified",
+        "repair_attempts_used": 0,
+        "tree_binding_equivalent": true
+      },
+      "agent_seconds": 42.81,
+      "verification_seconds": 2.41,
+      "independent_verification": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "receipt_hash": "fa5c523fc0ba013a87ecf49ead9c3d8e2d70c343056fef96d07963521723e259",
+        "requirements": {
+          "digits-are-not-case-changes": "VERIFIED",
+          "preserve-letter-splitting": "VERIFIED"
+        },
+        "counterexample": null
+      },
+      "ground_truth_correct": true,
+      "candidate_head": "b5e21bcc9a115e0267030e1ca39a6fa66a5623d0",
+      "recorded_at": "2026-11-02T13:49:10.360199Z"
+    },
+    {
+      "arm": "AB",
+      "task": "ufo-parsefilename-optional-opts",
+      "project": "ufo",
+      "agent": {
+        "outcome": "completed",
+        "duration_s": 21.51,
+        "changed_files": [
+          "src/parse.ts"
+        ],
+        "statement": "`parseFilename` no longer throws when you leave out the second argument, but I haven't run the code or the tests, because this session has no way to execute anything.\n\nThe fix is in `src/parse.ts:201`. `opts` is now an optional parameter, `opts?: { strict?: boolean }`, and the function reads `opts?.strict` instead of destructuring it:\n\n- **No `opts`:** `parseFilename('/path/to/filename.ext')` returns `filename.ext`, and `/path/to/.hidden-file` returns `.hidden-file`, the same as passing `{ strict: false }`.\n- **Explicit `opts.strict`:** this works as before, so `{ strict: true }` still returns",
+        "error": null,
+        "tokens": null,
+        "mode": "live"
+      },
+      "wallclock_s": 24.25,
+      "ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m473 passed\u001b[39m\u001b[22m\u001b[90m (473)\u001b[39m"
+      },
+      "independent_verification": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "receipt_hash": "b8a9e4cc2605ebde1392510bb3b5a60dc2802115132beab4e836fb4904617a42",
+        "requirements": {
+          "opts-is-optional": "VERIFIED",
+          "preserve-explicit-opts": "VERIFIED"
+        },
+        "counterexample": null,
+        "reasons": [],
+        "attempt_id": "AB-5809dc"
+      },
+      "arm_A_decision": "accept",
+      "arm_B_decision": "accept",
+      "ground_truth_correct": true,
+      "baseline_head": "63aaadd21e7b1bff7694c86a8ef02d55db9a419d",
+      "candidate_head": "63aaadd21e7b1bff7694c86a8ef02d55db9a419d",
+      "diff_lines": 19,
+      "recorded_at": "2026-11-02T13:49:43.537523Z"
+    },
+    {
+      "arm": "C",
+      "task": "ufo-parsefilename-optional-opts",
+      "project": "ufo",
+      "attempts": [
+        {
+          "attempt": 0,
+          "agent": {
+            "outcome": "completed",
+            "duration_s": 20.87,
+            "changed_files": [
+              "src/parse.ts"
+            ],
+            "statement": "`parseFilename` no longer throws when `opts` is omitted, but I haven't run it or the tests because this session can't execute commands. The only edit is in `src/parse.ts`.\n\n- **The change:** the signature is now `parseFilename(input = \"\", opts?: { strict?: boolean })`, and the function reads `opts?.strict` instead of destructuring the parameter.\n- **Omitted `opts`:** `parseFilename('/path/to/filename.ext')` now takes the non-strict path and returns `filename.ext`. `/path/to/.hidden-file` returns `.hidden-file`.\n- **Explicit `opts.strict`:** it's still a plain truthiness check, so its meaning h",
+            "error": null,
+            "tokens": null
+          },
+          "scope": {
+            "changed": [
+              "src/parse.ts"
+            ],
+            "allowed_paths": [
+              "src/parse.ts"
+            ],
+            "in_scope": [
+              "src/parse.ts"
+            ],
+            "out_of_scope": [],
+            "test_changes": [],
+            "dependency_changes": [],
+            "clean": true
+          },
+          "ordinary_tests": {
+            "ran": true,
+            "passed": true,
+            "runner": "npm-test",
+            "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m473 passed\u001b[39m\u001b[22m\u001b[90m (473)\u001b[39m"
+          },
+          "verification": {
+            "ok": true,
+            "verdict": "VERIFIED",
+            "receipt_hash": "fe009c4a686bf9f1c7212fdb7844c9663cb4d9905377649b7fd480724742ab3e",
+            "requirements": {
+              "opts-is-optional": "VERIFIED",
+              "preserve-explicit-opts": "VERIFIED"
+            },
+            "counterexample": null,
+            "reasons": [],
+            "attempt_id": "C-0-24e5de",
+            "integrity": {
+              "pointer_before": null,
+              "pointer_after": "fe009c4a686bf9f1c7212fdb7844c9663cb4d9905377649b7fd480724742ab3e",
+              "fresh_receipt": true,
+              "receipt_content_address_ok": true,
+              "referenced_objects_ok": true,
+              "candidate_identity": {
+                "files_checked": 39,
+                "files_hash_matched": [
+                  ".editorconfig",
+                  ".github/banner.svg",
+                  ".github/workflows/autofix.yml",
+                  ".github/workflows/ci.yml",
+                  ".gitignore",
+                  ".prettierrc",
+                  "CHANGELOG.md",
+                  "eslint.config.mjs",
+                  "LICENSE",
+                  "package.json",
+                  "pnpm-lock.yaml",
+                  "README.md",
+                  "renovate.json",
+                  "SECURITY.md",
+                  "src/encoding.ts",
+                  "src/index.ts",
+                  "src/parse.ts",
+                  "src/punycode.ts",
+                  "src/query.ts",
+                  "src/url.ts",
+                  "src/utils.ts",
+                  "test/base.test.ts",
+                  "test/double-slash.test.ts",
+                  "test/encoding.test.ts",
+                  "test/fixture/README.md",
+                  "test/fixture/toascii.json",
+                  "test/fixture/urltestdata.json",
+                  "test/is-same.test.ts",
+                  "test/join.test.ts",
+                  "test/normalize.test.ts",
+                  "test/parse.test.ts",
+                  "test/punycode.test.ts",
+                  "test/query.test.ts",
+                  "test/resolve.test.ts",
+                  "test/trailing-slash.test.ts",
+                  "test/types.test-d.ts",
+                  "test/url.test.ts",
+                  "test/utilities.test.ts",
+                  "tsconfig.json"
+                ],
+                "files_mismatched": [],
+                "files_missing": []
+              },
+              "snapshot_git_head_matches_receipt": true,
+              "change_scope": {
+                "allowed_paths": [
+                  "src/parse.ts"
+                ],
+                "changes": [
+                  {
+                    "path": "src/parse.ts",
+                    "kind": "modified",
+                    "classification": "VERIFIED",
+                    "reason": "Path authorised by the supplied contract; behaviour is checked separately"
+                  }
+                ],
+                "out_of_scope": [],
+                "unauthorised_classification": [],
+                "test_changes": [],
+                "dependency_changes": []
+              },
+              "exit_code": 0,
+              "attempt_id": "C-0-24e5de"
+            }
+          },
+          "committed_head": "852a27ae67568ded9e65b7238d7d5a3358ff52d8",
+          "tree_binding": {
+            "commit": "852a27ae67568ded9e65b7238d7d5a3358ff52d8",
+            "receipt_hash": "fe009c4a686bf9f1c7212fdb7844c9663cb4d9905377649b7fd480724742ab3e",
+            "candidate_hash": "8833d6fac1f129fb62bec93824cedec865624492ea12aaf37aa1a4ab96f8bf4b",
+            "files_checked": 39,
+            "files_matched": [
+              ".editorconfig",
+              ".github/banner.svg",
+              ".github/workflows/autofix.yml",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              ".prettierrc",
+              "CHANGELOG.md",
+              "eslint.config.mjs",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "SECURITY.md",
+              "src/encoding.ts",
+              "src/index.ts",
+              "src/parse.ts",
+              "src/punycode.ts",
+              "src/query.ts",
+              "src/url.ts",
+              "src/utils.ts",
+              "test/base.test.ts",
+              "test/double-slash.test.ts",
+              "test/encoding.test.ts",
+              "test/fixture/README.md",
+              "test/fixture/toascii.json",
+              "test/fixture/urltestdata.json",
+              "test/is-same.test.ts",
+              "test/join.test.ts",
+              "test/normalize.test.ts",
+              "test/parse.test.ts",
+              "test/punycode.test.ts",
+              "test/query.test.ts",
+              "test/resolve.test.ts",
+              "test/trailing-slash.test.ts",
+              "test/types.test-d.ts",
+              "test/url.test.ts",
+              "test/utilities.test.ts",
+              "tsconfig.json"
+            ],
+            "mismatches": [],
+            "equivalent": true,
+            "method": "sha256(git show <commit>:<path>) == candidateSnapshot.files[path].hash"
+          }
+        }
+      ],
+      "final": {
+        "status": "verified",
+        "repair_attempts_used": 0,
+        "tree_binding_equivalent": true
+      },
+      "agent_seconds": 23.54,
+      "verification_seconds": 6.64,
+      "independent_verification": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "receipt_hash": "fe009c4a686bf9f1c7212fdb7844c9663cb4d9905377649b7fd480724742ab3e",
+        "requirements": {
+          "opts-is-optional": "VERIFIED",
+          "preserve-explicit-opts": "VERIFIED"
+        },
+        "counterexample": null
+      },
+      "ground_truth_correct": true,
+      "candidate_head": "852a27ae67568ded9e65b7238d7d5a3358ff52d8",
+      "recorded_at": "2026-11-02T13:50:15.053861Z"
+    },
+    {
+      "arm": "AB",
+      "task": "entities-legacy-attribute-interrupted",
+      "project": "entities",
+      "agent": {
+        "outcome": "completed",
+        "duration_s": 68.27,
+        "changed_files": [
+          "src/decode.ts"
+        ],
+        "statement": "the legacy match. That value describes the current trie node, not the matched entity. In `&notin\\0;` the decoder stands on `notin`, which has a value, so the check passed and the old `&not` match was committed.\n\n**Fix:** the check now uses `this.excess !== 1`. `excess` resets to 0 when a legacy match is recorded and goes up by one per character, so 1 means the stopping character comes straight after the entity. In attribute mode, anything else is left undecoded. This logic is in a new private helper, `emitLegacyNamedEntity(char)`.\n\n**One addition beyond the failing cases:** the two exits for c",
+        "error": null,
+        "tokens": null,
+        "mode": "live"
+      },
+      "wallclock_s": 70.94,
+      "ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m124 passed\u001b[39m\u001b[22m\u001b[90m (124)\u001b[39m"
+      },
+      "independent_verification": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "receipt_hash": "463b419b95f2071449fad0da575f9e0aa46255cecee282cd66d4230ba7bb39f3",
+        "requirements": {
+          "interrupted-legacy-match-not-committed": "VERIFIED",
+          "preserve-attribute-decoding": "VERIFIED"
+        },
+        "counterexample": null,
+        "reasons": [],
+        "attempt_id": "AB-942b0f"
+      },
+      "arm_A_decision": "accept",
+      "arm_B_decision": "accept",
+      "ground_truth_correct": true,
+      "baseline_head": "83d0f6d0ce10136bbaee6beafeb5a1e825a40af6",
+      "candidate_head": "83d0f6d0ce10136bbaee6beafeb5a1e825a40af6",
+      "diff_lines": 72,
+      "recorded_at": "2026-11-02T13:51:35.070622Z"
+    },
+    {
+      "arm": "C",
+      "task": "entities-legacy-attribute-interrupted",
+      "project": "entities",
+      "attempts": [
+        {
+          "attempt": 0,
+          "agent": {
+            "outcome": "completed",
+            "duration_s": 77.43,
+            "changed_files": [
+              "src/decode.ts"
+            ],
+            "statement": "ed past the legacy match. `&notin` does have a value, though it requires a semicolon, so the check passed and `&not` was committed.\n\n**Fix:** the check now uses `this.excess !== 1`. `excess` is exactly 1 only when the failing character comes directly after the legacy match, so any larger value means the match was interrupted.\n\n**A second bug, also fixed:** the two compact-run failure paths never checked attribute mode at all, so `&paral<` and `&notindo<` would have been wrongly decoded the same way. All three failure sites now go through a new private `stopNamedEntity(char)` helper.\n\n| Input |",
+            "error": null,
+            "tokens": null
+          },
+          "scope": {
+            "changed": [
+              "src/decode.ts"
+            ],
+            "allowed_paths": [
+              "src/decode.ts"
+            ],
+            "in_scope": [
+              "src/decode.ts"
+            ],
+            "out_of_scope": [],
+            "test_changes": [],
+            "dependency_changes": [],
+            "clean": true
+          },
+          "ordinary_tests": {
+            "ran": true,
+            "passed": true,
+            "runner": "npm-test",
+            "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m124 passed\u001b[39m\u001b[22m\u001b[90m (124)\u001b[39m"
+          },
+          "verification": {
+            "ok": true,
+            "verdict": "VERIFIED",
+            "receipt_hash": "df0c959ed19deb5dc85df59b74c7abfd8007c8516c70df434b8f879708f6f596",
+            "requirements": {
+              "interrupted-legacy-match-not-committed": "VERIFIED",
+              "preserve-attribute-decoding": "VERIFIED"
+            },
+            "counterexample": null,
+            "reasons": [],
+            "attempt_id": "C-0-d61830",
+            "integrity": {
+              "pointer_before": null,
+              "pointer_after": "df0c959ed19deb5dc85df59b74c7abfd8007c8516c70df434b8f879708f6f596",
+              "fresh_receipt": true,
+              "receipt_content_address_ok": true,
+              "referenced_objects_ok": true,
+              "candidate_identity": {
+                "files_checked": 44,
+                "files_hash_matched": [
+                  ".github/dependabot.yml",
+                  ".github/FUNDING.yml",
+                  ".github/workflows/codeql-analysis.yml",
+                  ".github/workflows/dependabot-automerge.yml",
+                  ".github/workflows/gh-pages.yml",
+                  ".github/workflows/nodejs-test.yml",
+                  ".github/workflows/publish.yml",
+                  ".gitignore",
+                  "biome.json",
+                  "eslint.config.mjs",
+                  "LICENSE",
+                  "maps/entities.json",
+                  "maps/legacy.json",
+                  "maps/xml.json",
+                  "package-lock.json",
+                  "package.json",
+                  "readme.md",
+                  "scripts/benchmark.ts",
+                  "scripts/trie/compact-run.spec.ts",
+                  "scripts/trie/decode-trie.spec.ts",
+                  "scripts/trie/decode-trie.ts",
+                  "scripts/trie/encode-trie.spec.ts",
+                  "scripts/trie/encode-trie.ts",
+                  "scripts/trie/README.md",
+                  "scripts/trie/trie.ts",
+                  "scripts/write-decode-map.ts",
+                  "scripts/write-encode-map.ts",
+                  "src/decode-codepoint.ts",
+                  "src/decode-stream.spec.ts",
+                  "src/decode.spec.ts",
+                  "src/decode.ts",
+                  "src/encode.spec.ts",
+                  "src/encode.ts",
+                  "src/escape.spec.ts",
+                  "src/escape.ts",
+                  "src/generated/decode-data-html.ts",
+                  "src/generated/decode-data-xml.ts",
+                  "src/generated/encode-html.ts",
+                  "src/index.spec.ts",
+                  "src/index.ts",
+                  "src/internal/bin-trie-flags.ts",
+                  "src/internal/decode-shared.ts",
+                  "tsconfig.eslint.json",
+                  "tsconfig.json"
+                ],
+                "files_mismatched": [],
+                "files_missing": []
+              },
+              "snapshot_git_head_matches_receipt": true,
+              "change_scope": {
+                "allowed_paths": [
+                  "src/decode.ts"
+                ],
+                "changes": [
+                  {
+                    "path": "src/decode.ts",
+                    "kind": "modified",
+                    "classification": "VERIFIED",
+                    "reason": "Path authorised by the supplied contract; behaviour is checked separately"
+                  }
+                ],
+                "out_of_scope": [],
+                "unauthorised_classification": [],
+                "test_changes": [],
+                "dependency_changes": []
+              },
+              "exit_code": 0,
+              "attempt_id": "C-0-d61830"
+            }
+          },
+          "committed_head": "311005f8d85fe38fa960be19c41787bb4b76e948",
+          "tree_binding": {
+            "commit": "311005f8d85fe38fa960be19c41787bb4b76e948",
+            "receipt_hash": "df0c959ed19deb5dc85df59b74c7abfd8007c8516c70df434b8f879708f6f596",
+            "candidate_hash": "849458cb39703dc9b8a3596f735c9a84240e7a639a9441dea6e69c5641dc085a",
+            "files_checked": 44,
+            "files_matched": [
+              ".github/dependabot.yml",
+              ".github/FUNDING.yml",
+              ".github/workflows/codeql-analysis.yml",
+              ".github/workflows/dependabot-automerge.yml",
+              ".github/workflows/gh-pages.yml",
+              ".github/workflows/nodejs-test.yml",
+              ".github/workflows/publish.yml",
+              ".gitignore",
+              "biome.json",
+              "eslint.config.mjs",
+              "LICENSE",
+              "maps/entities.json",
+              "maps/legacy.json",
+              "maps/xml.json",
+              "package-lock.json",
+              "package.json",
+              "readme.md",
+              "scripts/benchmark.ts",
+              "scripts/trie/compact-run.spec.ts",
+              "scripts/trie/decode-trie.spec.ts",
+              "scripts/trie/decode-trie.ts",
+              "scripts/trie/encode-trie.spec.ts",
+              "scripts/trie/encode-trie.ts",
+              "scripts/trie/README.md",
+              "scripts/trie/trie.ts",
+              "scripts/write-decode-map.ts",
+              "scripts/write-encode-map.ts",
+              "src/decode-codepoint.ts",
+              "src/decode-stream.spec.ts",
+              "src/decode.spec.ts",
+              "src/decode.ts",
+              "src/encode.spec.ts",
+              "src/encode.ts",
+              "src/escape.spec.ts",
+              "src/escape.ts",
+              "src/generated/decode-data-html.ts",
+              "src/generated/decode-data-xml.ts",
+              "src/generated/encode-html.ts",
+              "src/index.spec.ts",
+              "src/index.ts",
+              "src/internal/bin-trie-flags.ts",
+              "src/internal/decode-shared.ts",
+              "tsconfig.eslint.json",
+              "tsconfig.json"
+            ],
+            "mismatches": [],
+            "equivalent": true,
+            "method": "sha256(git show <commit>:<path>) == candidateSnapshot.files[path].hash"
+          }
+        }
+      ],
+      "final": {
+        "status": "verified",
+        "repair_attempts_used": 0,
+        "tree_binding_equivalent": true
+      },
+      "agent_seconds": 80.31,
+      "verification_seconds": 7.41,
+      "independent_verification": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "receipt_hash": "df0c959ed19deb5dc85df59b74c7abfd8007c8516c70df434b8f879708f6f596",
+        "requirements": {
+          "interrupted-legacy-match-not-committed": "VERIFIED",
+          "preserve-attribute-decoding": "VERIFIED"
+        },
+        "counterexample": null
+      },
+      "ground_truth_correct": true,
+      "candidate_head": "311005f8d85fe38fa960be19c41787bb4b76e948",
+      "recorded_at": "2026-11-02T13:53:04.685273Z"
+    }
+  ]
+}

@@ -4,13 +4,20 @@
 independently verifies it against a held-out approved contract, and (on contradiction) feeds a
 reproducible counterexample back to drive a genuine repair.**
 
-**Release decision: NO-GO for publishing v0.2.0.** The branch is retained, fully tested, and
-documented. One mandatory release-gate condition is **not** satisfied honestly: *a live
-agent-produced defect independently contradicted, driving a live counterexample-based repair.*
-The live agent (Codex, ChatGPT-authenticated) produced **correct** implementations on every
-well-specified task tested — which real Sentinel independently **VERIFIED** — and, on an
-under-specified task, correctly **asked for clarification instead of guessing**. I did not
-fabricate, sandbag, or rig a defect to force the gate. See "Release gate" below.
+**Release decision: NO-GO for publishing v0.2.0 as the "developer aspirin" milestone.** The branch is
+retained, fully tested (127 passing, 0 skipped), and documented. Two mandatory gate conditions are not
+satisfied, and the independent real-world benchmark now shows *why* they cannot be satisfied honestly on
+this corpus: across 6 frozen real historical defects in 3 independently maintained projects, the live
+agent (Claude Code) produced **correct code on all 6, first attempt**. Independent verification agreed
+6/6, ordinary tests agreed 6/6, and false accepts were 0 in both arms. So there were **0 detections and
+0 repairs** — nothing for the aspirin claim to rest on. I did not weaken a task, hide a requirement,
+expand the corpus after seeing results, or substitute a scripted candidate to force a demonstration.
+
+What *is* supported is a narrower claim, kept strictly separate below: on real third-party repositories
+ShipGuard runs the project's own tests, obtains an independent content-addressed receipt from a pinned
+external verifier, enforces change scope from the real diff, and commits a candidate whose tree is
+provably byte-identical to what was verified — 6/6, with every change confined to its allowed file. That
+is a **verification** result, not a detection or repair result. See "The two claims, separated".
 
 This supersedes nothing: v0.1.2 (the security-remediation pre-release) remains published and its
 controls still pass. v0.1.1 evidence is preserved in [`RELEASE-EVIDENCE.md`](RELEASE-EVIDENCE.md).
@@ -27,12 +34,38 @@ controls still pass. v0.1.1 evidence is preserved in [`RELEASE-EVIDENCE.md`](REL
   - `7de7a1e` SECOND — secure agent adapters (remove `--dangerously-skip-permissions`; real Codex auth probe; gate Claude)
   - `69d4dd1` THIRD+FOURTH — real Sentinel acceptance + wired repair-loop CLI
   - `5efb373` FOURTH — repair loop end-to-end + parameterised tasks + CI Sentinel job + live-Codex evidence
+  - `e238281` docs — CI green on the exact branch commit; gate condition 10 MET
+  - `9945f37` Phase 1 — close the seven evidence-integrity gaps (CI pipefail + negative control, no stale
+    receipt reuse, real Sentinel status vocabulary, committed-tree binding, diff-derived change scope,
+    portable evidence, accurate ASPIRIN classification)
+  - `567ce9c` Phase 2 — safe mode against real developer repositories (project inspection, isolated
+    clone, original tree provably untouched)
+  - `3757bb9` Phase 3 — frozen real-world benchmark corpus + safe-mode `node_modules` exclusion fix
+  - `09b896d`/`b97cc99` Phase 3 — report generated from the artifacts, not hand-transcribed
+  - `2b4950f` Phase 3 — **manifest frozen** (sha256 `a380a1b7…`, harness `b97cc99`, clean tree)
+  - `4da0bcd` Phase 4 — an exhausted provider is `unavailable`, not a failed repair; corpus-integrity tests
+  - `9bbe0f7` Phase 4 — fix `--agent` parsing that silently ran an empty benchmark
 
 Pinned stack (unchanged): `actenon-kernel==1.2.1`, `actenon-protocol==1.4.0`, `actenon-permit==1.4.0`,
 `actenon-scan==1.5.0`, `cryptography==44.0.0`. External verifier: **Sentinel** pinned at commit
-`becba502c8dbebdd5e52b8ca09122f86e4e37bb3` (github.com/rossbuckley1990-hash/sentinel-verified, v1.0.0).
-Live agent: **Codex CLI 0.163.0** (authenticated, "Logged in using ChatGPT"). **Claude Code 2.1.301
-OAuth is EXPIRED** in this environment → live Claude is disabled (see SECOND).
+`becba502c8dbebdd5e52b8ca09122f86e4e37bb3` (github.com/rossbuckley1990-hash/sentinel-verified, v1.0.0),
+running its own vitest 5.0.5. Live agents: **Claude Code 2.1.301** (OAuth re-authenticated and probed
+before the benchmark run) and **Codex CLI 0.163.0** (authenticated, but its usage limit was exhausted
+until 2026-11-08, so the benchmark ran on Claude). Earlier in this milestone Claude's OAuth was
+expired and live Claude was honestly disabled; that state was re-tested rather than assumed.
+
+---
+
+## Test suite (127 passing, 0 skipped)
+
+| file | tests | what it locks in |
+|---|---|---|
+| `tests/test_trust_boundary.py` | **31** | the v0.1.2 security-remediation controls — **unchanged** (gate condition 8) |
+| `tests/test_evidence_integrity.py` | 55 | Phase 1: receipt freshness, content-addressing, candidate identity, scope, tree binding, CI negative controls |
+| `tests/test_sentinel.py` | 15 | acceptance logic against the real Sentinel schema + real-CLI integration |
+| `tests/test_real_repo_mode.py` | 9 | Phase 2: safe mode on a real repository; the original tree is provably untouched |
+| `tests/test_benchmark_corpus.py` | 9 | Phase 3: the frozen manifest is untampered, schema-legal, and its omissions are auditable |
+| `tests/test_adapters.py` | 8 | adapter confinement, and provider exhaustion ≠ repair failure |
 
 ---
 
@@ -50,9 +83,17 @@ export SHIPGUARD_SENTINEL=/tmp/sentinel-verified/dist/cli.js
 export SHIPGUARD_NODE_MODULES=/tmp/sentinel-verified/node_modules
 export SHIPGUARD_TSX=/tmp/sentinel-verified/node_modules/.bin/tsx
 
-pytest -q                                   # 51 passed (36 core + 15 Sentinel)
-pytest -q -m "not sentinel_integration"     # 48 passed, 3 deselected (core job)
-pytest -q -m sentinel_integration           # 3 passed (real Sentinel CLI)
+pytest -q                                   # 127 passed, 0 skipped
+pytest -q -m "not sentinel_integration"     # 119 passed, 8 deselected (CI core job)
+pytest -q -m sentinel_integration           # 8 passed (real pinned Sentinel CLI)
+pytest -q tests/test_trust_boundary.py      # 31 passed — the v0.1.2 controls, unchanged
+
+# the frozen benchmark corpus: re-validate every task, then re-freeze and run the arms
+python benchmark/harness.py validate        # 6 tasks, 5 measured conditions each
+python benchmark/harness.py freeze          # refuses to write unless every task is valid
+claude -p "Reply with the single word OK."  # the provider is probed, never assumed
+SHIPGUARD_ENABLE_LIVE_CLAUDE=1 python benchmark/harness.py run --agent claude
+python benchmark/harness.py report          # BENCHMARK-REPORT-v0.2.0.md, generated from the artifacts
 
 # the deterministic repair loop with REAL Sentinel (no model calls, no cost):
 actenon-shipguard run "Conserve every penny when splitting a whole-pence total across N parties." \
@@ -198,13 +239,92 @@ are **not** claimed:
 These remain open work (tasks #23, #24) and are prerequisites for any future claim of a complete
 Do→Model→Verify→Remember→Prove chain.
 
-## SEVENTH — independent benchmark: **NOT performed**
+## SEVENTH — independent real-world benchmark: **PERFORMED, with an honest negative result**
 
-No multi-codebase, held-out-acceptance benchmark comparing ordinary vs ShipGuard-assisted execution was
-run. No defect-detection rate, repair rate, false-positive rate, token or time comparison is claimed.
-The three live-Codex runs above are illustrative single-task results, **not** a benchmark. Constructing
-a harder, multi-codebase task corpus is the natural path to exercising (and measuring) the live-agent
-defect→repair path that this NO-GO turns on.
+Artifacts: [`BENCHMARK-MANIFEST-v0.2.0.json`](BENCHMARK-MANIFEST-v0.2.0.json) (frozen, sha256
+`a380a1b7f30756d5af3026a94ec3f33f996d888f6819e048341ab0465c36d6cc`), [`BENCHMARK-RESULTS-v0.2.0.json`](BENCHMARK-RESULTS-v0.2.0.json),
+[`BENCHMARK-REPORT-v0.2.0.md`](BENCHMARK-REPORT-v0.2.0.md) (generated from those two files by
+`benchmark/harness.py report`, so no number is hand-transcribed).
+
+**Corpus.** 6 tasks across 3 independently maintained permissively-licensed projects — `unjs/scule`
+(MIT), `unjs/ufo` (MIT), `fb55/entities` (BSD-2-Clause). Every task is a real upstream defect fix; the
+benchmark baseline is that fix commit's **parent**, so the agent faces the project's own genuine
+pre-fix state. Acceptance criteria are assertions from the project's own test suite, and every expected
+value was measured by executing the real code at both revisions rather than transcribed.
+
+**Frozen before any agent ran**, and the freeze is enforced: `freeze` refuses to write a manifest while
+any task fails its gate. Each task had to satisfy five *measured* conditions — baseline CONTRADICTED by
+the pinned oracle; the project's own tests pass at that baseline (so they cannot see the defect);
+upstream fix VERIFIED; tests pass at the fix; and applying only the upstream source change to the
+frozen baseline still passes the baseline's own tests. That last condition is what makes arm A's
+"ordinary tests only" rule fair, and it rejected four otherwise-good tasks (see below).
+
+**Arms.** A = ordinary agent + the project's tests only. B = the same + independent Sentinel
+verification, no repair. C = the same + ShipGuard's bounded counterexample-driven repair. A and B are
+evaluated on one shared session per task, because B adds only a gate and gives the agent no feedback,
+so pairing them is correct and running two sessions would add noise to a comparison meant to be paired.
+
+**Agent.** The manifest planned Codex; Codex was authenticated but its usage limit was exhausted until
+2026-11-08, so the run used **Claude Code 2.1.301** (re-authenticated, then probed — `acceptEdits`
+plus an explicit `Read/Edit/Write` allowlist and a `Bash/WebFetch/WebSearch/NotebookEdit` denylist, no
+permission-bypass flag). Corpus, prompts, contracts and oracle are byte-identical to the freeze.
+
+**Measured result (12/12 cells, 2026-11-02T13:43:39Z → 13:53:04Z).**
+
+| metric | value |
+|---|---|
+| arm A/B sessions | 6 |
+| agent produced a change | 6 / 6 |
+| ordinary tests green | 6 / 6 |
+| independently VERIFIED | **6 / 6** |
+| arm A false accepts | **0** |
+| arm B false accepts | **0** |
+| defects invisible to ordinary tests (aspirin instances) | **0** |
+| arm C verified | 6 / 6 |
+| arm C verified **after** a repair attempt | **0** |
+| committed tree proven byte-identical to the verified candidate | 6 / 6 |
+| changes confined to the allowed file | 6 / 6 |
+| agent time / verification time (arm C) | 250.8 s / 31.9 s |
+
+**The live agent solved all six real defects correctly on its first attempt.** The projects' own test
+suites agreed with the independent oracle on every task, so there was no case where ordinary tests were
+green while an approved requirement was violated — nothing for ShipGuard to catch, and no
+counterexample to feed back.
+
+This is reported as the outcome. The corpus was **not** expanded to obtain a favourable demonstration,
+no task was weakened, no requirement was hidden from the prompt, and no prewritten or scripted
+candidate was substituted. Per the mandate, a repair that did not naturally occur is not claimed.
+
+**What the run does establish** is a verification result, not a detection or repair result: the full
+pipeline works end to end against a live model on real third-party repositories — isolated clone, real
+project tests, real pinned Sentinel, diff-derived scope enforcement, independent verification, and a
+committed tree proven byte-identical to what was verified, on 6/6 tasks.
+
+**What it does not establish:** any detection rate, repair rate or reliability improvement (there were
+no detections to measure); anything about coding agents in general (one model, six tasks, not sampled
+from a population); anything about hostile-agent containment (`local-advisory` runner, same OS
+account).
+
+**Candidates rejected during selection — all recorded in the manifest with the measured reason, so the
+small corpus cannot be mistaken for cherry-picking.** `unjs/defu` (its real `__proto__`
+prototype-pollution fix cannot survive Sentinel's contract parsing: an own `__proto__` data property is
+normalised away, so the malicious input never reaches the code and ShipGuard's own integrity layer
+correctly refused the receipt); `unjs/ohash` and `josdejong/jsonrepair` (Sentinel runs its **own**
+vitest config over every `*.test.*` file, so test files that need a build step made its mandatory
+ordinary-test checks CONTRADICTED at both baseline and fix); `unjs/pathe` (a devDependency imported by
+source at every usable revision); `destr` (its suite asserts a V8 error string that Node 26 no longer
+produces); `marked`, `smol-toml`, `radix3`, `mlly`, `confbox`, `untyped` (suites do not collect under
+the pinned vitest with zero installs); `es-toolkit` (whole-suite cost); `remeda`, `hookable`, `exsolve`
+(vetting cost / no pure single-export probe / machine-specific return values). Tasks dropped by the
+gate: `scule-segment-lowering` (3815767), entities `914e397` and `05af0b3`, and two ufo tasks at 2023–24
+revisions.
+
+**A structural finding worth stating plainly:** Sentinel always records a mandatory `preserved-tests`
+check that restores the baseline's test files and runs them against the candidate. A change that alters
+any behaviour asserted by an existing test therefore can never be VERIFIED, however correct it is. The
+class of tasks ShipGuard+Sentinel can verify is exactly the class whose fix **adds** assertions without
+changing existing ones — which is also precisely the class where "ordinary tests are green but a real
+requirement is violated" can occur. That is a genuine scope limit, not a tuning opportunity.
 
 ---
 
@@ -212,27 +332,52 @@ defect→repair path that this NO-GO turns on.
 
 | # | Mandatory condition | Status |
 |---|---|---|
-| 1 | Real agent execution demonstrated | **MET** — 3 live Codex runs, model-generated changes |
-| 2 | Ordinary tests and genuine Sentinel checks both run | **MET** — vitest + real `sentinel verify`, structured receipts |
-| 3 | ≥1 real **agent-produced** defect independently contradicted | **NOT MET** — live agent produced correct code; contradiction shown only on fixture defects (real Sentinel) |
-| 4 | Counterexample feedback drives a genuine **repair attempt** | **PARTIAL** — proven with the offline adapter + real Sentinel; **not** with a live agent (no live defect to repair) |
-| 5 | Repaired candidate independently rechecked | **MET** — real Sentinel re-verification (offline loop + live correct fixes) |
-| 6 | Unsafe agent execution permissions removed | **MET** — `--dangerously-skip-permissions` gone; supported sandbox/permission controls; tested |
+| 1 | Real agent execution demonstrated | **MET** — 12 live Claude sessions on the frozen corpus (6 arm A/B + 6 arm C), all model-generated, plus 3 earlier live Codex runs |
+| 2 | Ordinary tests and genuine Sentinel checks both run | **MET** — each project's own vitest suite + real `sentinel verify` at the pinned commit, structured content-addressed receipts |
+| 3 | ≥1 real **agent-produced** defect independently contradicted | **NOT MET — measured, not assumed.** Across 6 frozen real-world tasks the live agent produced 0 defects: 6/6 were independently VERIFIED and arm A/arm B false accepts were both 0. No contradiction occurred, so nothing was detected. I did not weaken a task, hide a requirement, or expand the corpus to force one |
+| 4 | Counterexample feedback drives a genuine **repair attempt** | **NOT MET with a live agent** — 0 of 6 arm-C runs needed a repair (all verified on attempt 0), so no counterexample was ever fed back. The loop itself is proven with the offline adapter + real Sentinel (`tests/test_sentinel.py::test_offline_repair_loop_end_to_end_with_real_sentinel`), but that is not live-agent evidence |
+| 5 | Repaired candidate independently rechecked | **MET** — real Sentinel re-verification; and on all 6 arm-C runs the committed tree was proven byte-identical to the verified candidate (`tree_binding.equivalent` 6/6) |
+| 6 | Unsafe agent execution permissions removed | **MET** — `--dangerously-skip-permissions` gone; supported sandbox/permission controls; tested (`tests/test_adapters.py`, 8 tests) |
 | 7 | Apprentice/Howdex/Workproof real **or** explicitly excluded | **MET (excluded)** — see FIFTH |
-| 8 | Historical v0.1.2 security controls still pass | **MET** — 31 tests unchanged within the 51 |
+| 8 | Historical v0.1.2 security controls still pass | **MET** — `tests/test_trust_boundary.py` still exactly 31 tests, unchanged, passing within the 127 |
 | 9 | Clean installation reproduces the supported workflow | **MET** — wheel → fresh venv → doctor/demo/run from unrelated cwd |
-| 10 | CI passes against the exact release commit | **MET** — CI green on `6d3a6b4` (verify py3.11 + py3.12, and sentinel-integration which clones+builds the pinned Sentinel and runs the real-CLI tests + offline loop): <https://github.com/Actenon/actenon-shipguard/actions/runs/41434274869> |
-| 11 | Every limitation honestly documented | **MET** — this document |
+| 10 | CI passes against the exact release commit | see note below — re-checked against the final commit before any publication decision |
+| 11 | Every limitation honestly documented | **MET** — this document plus `BENCHMARK-REPORT-v0.2.0.md` §7 and the manifest's measured exclusion reasons |
 
-**Decision: NO-GO for publishing v0.2.0.** Conditions 3 and 4 are not satisfied with a live agent, and
-I will not fabricate or rig a live-agent defect to force them. The tested branch is retained. This is
-the disciplined outcome the mandate prescribes when a mandatory gate is unmet.
+### The two claims, separated
 
-**What would flip this to GO:** a genuine live-agent run on a task hard enough (or a benchmark corpus
-broad enough) that the agent's **own** first attempt is contradicted by real Sentinel and the
-counterexample drives a real repair to independent re-verification. Every other gate condition is met
-(including CI green on the exact commit); the machinery is built and tested. The single missing piece is
-an honest live-agent defect, which needs a harder task corpus (SEVENTH), **not** a code change.
+**Claim 1 — limited verification (SUPPORTED).** On real third-party repositories, ShipGuard can take a
+live coding agent's change, run the project's own tests, obtain an independent content-addressed
+verification receipt from a pinned external verifier, enforce the change scope from the real diff, and
+commit a candidate whose tree is provably byte-identical to what was verified. Measured: 6/6 tasks,
+3 independently maintained projects, 0 out-of-scope changes, 0 stale or substituted receipts.
+
+**Claim 2 — the "developer aspirin" (NOT SUPPORTED).** That ShipGuard catches defects ordinary tests
+miss and repairs them from counterexample feedback. Measured: **0 detections and 0 repairs**, because
+the live agent was correct on all six tasks. Claim 2 is not merely unproven here — this corpus provides
+no evidence for it in either direction, since the condition that would exercise it never arose. It must
+not be advertised.
+
+**Decision: NO-GO for publishing v0.2.0 as the "developer aspirin" milestone.** Gate conditions 3 and 4
+are not satisfied, and they cannot be satisfied honestly on this corpus because the agent did not fail.
+I will not fabricate, sandbag, or rig a live-agent defect to force them, and I will not describe the
+six successful verifications as a reliability improvement.
+
+A **scoped pre-release of Claim 1 only** is technically eligible: every other condition is met, the
+suite is 127 passing / 0 skipped, and the artifacts are independently checkable. It is **not published
+here**, because publication was not authorised and the mandate requires authorisation before publishing.
+If authorised, it must ship under a name and description that state Claim 1 only, carry the benchmark's
+negative result prominently, and must not use "catches the defects your tests miss" framing.
+
+**What would flip Claim 2 to GO:** a live-agent run on a corpus where the agent *naturally* produces at
+least one change that the project's own tests accept while the independent oracle contradicts it, and
+where the counterexample then drives a real repair to independent re-verification. The machinery, the
+frozen corpus, the gate and the reporting are all built and tested; what is missing is an honest
+failure, which is a property of the agent and the task difficulty — not something a code change can
+supply. Two concrete paths: (a) re-run when Codex's quota resets on 2026-11-08, since a different model
+may fail where Claude did not, and the harness records the agent actually used; (b) extend the corpus
+within the measured constraints to harder add-only tasks (larger diffs, multi-file scope, subtler
+boundary conditions) — declared and frozen in advance, never after seeing a result.
 
 ---
 
@@ -248,10 +393,27 @@ an honest live-agent defect, which needs a harder task corpus (SEVENTH), **not**
   repo and not referenced in the prompt, and the candidate is materialised before verification; but a
   `workspace-write` sandbox confines **writes**, not all **reads**. True read-isolation needs OS
   sandboxing.
-- **Live Claude is disabled** (expired OAuth + unvalidated confinement); live Codex is authenticated.
-  No model activity is ever fabricated when a provider is unavailable.
+- **Provider availability is probed, never assumed.** At the time of the benchmark run Claude Code was
+  authenticated (and ran the benchmark) while Codex was authenticated but usage-limited until
+  2026-11-08. Earlier in this milestone the reverse was true. An unavailable or exhausted provider is
+  recorded as `unavailable` and the benchmark refuses to run — no model activity is ever fabricated, and
+  no offline or scripted candidate is substituted for a live one.
+- **Claude's confinement is permission-based, not OS-isolation.** `acceptEdits` plus a `Read/Edit/Write`
+  allowlist and a `Bash/WebFetch/WebSearch/NotebookEdit` denylist constrain what the agent may *do*, but
+  the file tools are not confined to the candidate directory the way Codex's `workspace-write` sandbox
+  confines writes. The held-out contract and receipt store live outside the repository and are never
+  referenced in the prompt, but this is prompt/timing hold-out, not read isolation.
+- **The benchmark measured one model on six tasks.** No detection rate, repair rate, false-positive
+  rate or reliability improvement can be inferred from it, and none is claimed. Agent runs are not
+  bit-reproducible; everything around them (corpus, contracts, validation, aggregation, report) is
+  deterministic from the pinned commits.
+- **Verifiable task class is narrow.** Because Sentinel's mandatory `preserved-tests` check replays the
+  baseline's own tests against the candidate, any correct change that alters an existing assertion is
+  unverifiable by construction. Behaviour-change and refactor tasks are out of scope for this verifier.
 - **Apprentice/Howdex/Workproof are not integrated** (excluded above).
 - **External runtime dependencies:** Node, tsx, and a built Sentinel are required for the real
-  verification path (`doctor` reports them; CI provisions them).
+  verification path (`doctor` reports them; CI provisions them). The benchmark additionally needs the
+  corpus projects' own suites to collect under the pinned vitest with zero installs.
 - **Not claimed:** general correctness, hostile-agent containment, stable v1.0.0, npm/PyPI
-  distribution, a complete repair-loop product, or any benchmark improvement percentage.
+  distribution, a complete repair-loop product, any benchmark improvement percentage, or the
+  "developer aspirin" framing.
