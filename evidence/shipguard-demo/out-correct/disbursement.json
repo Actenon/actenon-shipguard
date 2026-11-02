@@ -2,8 +2,8 @@
   "allocation_id": "alloc-1",
   "code_artifact_sha256": "755e8a8397efb9c02c387c87e89f4c53e20637b7933a75f9b9607ee770fa9ee7",
   "conserved": true,
-  "executed_at": "2026-11-01T21:50:10.267883Z",
-  "nonce": "nonce-4378b12f",
+  "executed_at": "2026-11-02T07:55:19.137922Z",
+  "nonce": "nonce-81220d26",
   "parties": 3,
   "resource_id": "ledger-1",
   "shares": [

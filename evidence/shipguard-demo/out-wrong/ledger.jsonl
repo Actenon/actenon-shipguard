@@ -1,1 +1,1 @@
-{"authority_signature": "sF0ocX_ixBMoLQs0xgNouqDOUoDDjnP91rnZp1SQ7xfRgw10f2lO2bjGhqgOf_aEOc-pt5ukVsi4usLqIRHxCg", "record": {"code": "NOT_VERIFIED", "decision": "REFUSE", "evidence": {}, "layer": "CORRECTNESS", "reason": "correctness NOT_VERIFIED (property=VIOLATED, sentinel_ok=True, failed_checks=[])", "ts": "2026-11-01T21:50:10.867834Z"}}
+{"code": "NOT_VERIFIED", "decision": "REFUSE", "evidence": {}, "layer": "CORRECTNESS", "prev": "genesis", "reason": "correctness NOT_VERIFIED (property=VIOLATED, sentinel_ok=True, failed_checks=[])", "ts": "2026-11-02T07:55:19.732048Z"}

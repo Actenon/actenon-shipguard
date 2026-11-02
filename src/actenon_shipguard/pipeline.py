@@ -226,7 +226,8 @@ def run_demo(work_dir: Path, tsx: Path, *, trials: int = 200000) -> dict[str, An
         "generated_at": _now(),
         "authority_signer": {"algorithm": "Ed25519", "key_id": keypairs["authority"].key_id},
         "correctness_prover": {"algorithm": "Ed25519", "key_id": keypairs["correctness"].key_id},
-        "trust_roots_file": str(work / "trust" / "trust-roots.json"),
+        # Portable reference relative to the demo output dir — never an absolute local path in public evidence.
+        "trust_roots_file": "trust/trust-roots.json",
         "property_trials": trials,
         "scenarios": scenarios,
     }
