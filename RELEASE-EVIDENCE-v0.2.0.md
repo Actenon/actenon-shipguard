@@ -412,6 +412,20 @@ no `codex`/`claude`): 120 passed, 8 deselected, 0 failed, 0 skipped.
 Condition 10 is recorded as MET only against a run that is green on the exact commit being described,
 with the run id stated, and only after the pipefail control is in place.
 
+Runs after the fix, all green with **0 skipped** in every job (`verify (3.11)` 120 passed / 8
+deselected, `verify (3.12)` 120 passed / 8 deselected, `sentinel-integration` 8 passed / 120
+deselected):
+
+| commit | run | content |
+|---|---|---|
+| `59ab439` | [41460094532](https://github.com/Actenon/actenon-shipguard/actions/runs/41460094532) | last commit changing executable code or tests |
+| `751fb54` | 41460468709 | documentation only (this withdrawal) |
+| `f0c16a3` | 41460867080 | documentation only (report reproduction steps) — branch tip at the time of writing |
+
+The commit that adds this table is itself documentation-only and re-runs the same workflow; its run id
+is reported in the conversation rather than chased into the file, since recording it would require
+another commit ad infinitum.
+
 ---
 
 ## Limitations (honest scope)
