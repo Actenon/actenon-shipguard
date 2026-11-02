@@ -206,21 +206,29 @@ NOT established:
 ## 8. Reproduction
 
 ```sh
-# 1. pinned independent oracle (no npm install of shipguard required)
+# 1. pinned independent oracle (Sentinel is not on npm; build the exact commit)
 git clone https://github.com/rossbuckley1990-hash/sentinel-verified.git
 cd sentinel-verified && git checkout becba502c8dbebdd5e52b8ca09122f86e4e37bb3 && npm ci && npm run build && cd ..
-
-# 2. ShipGuard's own suite (must be 0 skipped)
-pip install -e '.[dev]'
-SHIPGUARD_SENTINEL=$PWD/sentinel-verified/dist/cli.js pytest -q -rs
-
-# 3. re-validate and re-freeze the corpus, then run the arms
 export SHIPGUARD_SENTINEL=$PWD/sentinel-verified/dist/cli.js
 export SHIPGUARD_TSX=$PWD/sentinel-verified/node_modules/.bin/tsx
+export SHIPGUARD_NODE_MODULES=$PWD/sentinel-verified/node_modules
+
+# 2. ShipGuard's own suite — 128 passed, 0 skipped (all three vars above are required,
+#    otherwise the sentinel_integration tests skip and CI fails the run for it)
+pip install -e '.[dev]'
+pytest -q -rs
+
+# 3. re-validate the corpus against the frozen gate, then re-freeze
 python benchmark/harness.py validate
-python benchmark/harness.py freeze
-codex login status          # the benchmark refuses to run without a real authenticated agent
-python benchmark/harness.py run
+python benchmark/harness.py freeze   # refuses to write unless every task passes all 5 conditions
+
+# 4. run the arms with a LIVE agent — the harness probes the provider first and refuses to
+#    run at all if it is missing, unauthenticated or quota-exhausted
+claude -p 'Reply with the single word OK.'   # or: codex login status
+SHIPGUARD_ENABLE_LIVE_CLAUDE=1 python benchmark/harness.py run --agent claude
+# python benchmark/harness.py run --agent codex   # when that provider's quota is available
+
+# 5. regenerate this document from the artifacts
 python benchmark/harness.py report
 ```
 
