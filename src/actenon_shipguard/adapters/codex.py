@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -31,7 +32,15 @@ class CodexAdapter:
     def available(self) -> tuple[bool, str]:
         if shutil.which("codex") is None:
             return False, "codex CLI not found on PATH"
-        return True, "codex CLI present"
+        # Real authentication probe — never assume the binary present means authenticated,
+        # and never fabricate model activity when the provider is unavailable.
+        code, out, err, timed_out = run_bounded(["codex", "login", "status"], Path.cwd(), 30)
+        combined = ((out or "") + "\n" + (err or "")).lower()
+        if timed_out:
+            return False, "codex login status timed out"
+        if code == 0 and "logged in" in combined:
+            return True, "codex CLI present and authenticated"
+        return False, "codex CLI present but NOT authenticated (run `codex login`) — live execution disabled"
 
     def propose(self, *, task: str, repo: Path, attempt: int, feedback: str | None,
                 timeout: int, target_file: str = "src/settle.ts", export: str = "allocate") -> AgentResult:
@@ -40,7 +49,11 @@ class CodexAdapter:
         if not ok:
             return AgentResult(self.name, self.mode, "unavailable", "", attempt=attempt, error=reason)
         prompt = build_prompt(task, attempt, feedback, target_file, export)
-        cmd = ["codex", "exec", "--skip-git-repo-check", "--sandbox", self.sandbox, "-C", str(repo)]
+        # Confined to the candidate repo via the supported workspace-write sandbox (NEVER
+        # --dangerously-bypass-approvals-and-sandbox). -o captures the final message reliably.
+        last_msg = Path(tempfile.mkdtemp(prefix="sg-codex-")) / "last-message.txt"
+        cmd = ["codex", "exec", "--skip-git-repo-check", "--sandbox", self.sandbox,
+               "-C", str(repo), "-o", str(last_msg)]
         if self.model:
             cmd += ["--model", self.model]
         cmd += [prompt]
@@ -49,7 +62,8 @@ class CodexAdapter:
         dur = round(time.time() - start, 2)
         combined = (out or "") + "\n" + (err or "")
         changed, diff = git_diff(repo)
-        statement = _extract_statement(out or "")
+        statement = (last_msg.read_text()[-1200:] if last_msg.exists()
+                     else _extract_statement(out or ""))
 
         if timed_out:
             return AgentResult(self.name, self.mode, "interrupted", statement, changed, diff,
