@@ -1,0 +1,57 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Actenon ShipGuard — repair-loop evidence</title><style>
+:root{--bg:#0f1115;--fg:#e6e6e6;--mut:#9aa4b2;--ok:#2ea44f;--bad:#d73a49;--warn:#d29922;--card:#161b22;--line:#30363d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:32px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:28px 0 10px;color:var(--fg)}
+.sub{color:var(--mut);margin:0 0 24px}.tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;border:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;margin:8px 0}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+code{background:#0b0e13;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.pill{font-weight:700;padding:2px 8px;border-radius:10px;font-size:12px}
+.allow{background:rgba(46,164,79,.15);color:var(--ok);border:1px solid var(--ok)}
+.refuse{background:rgba(215,58,73,.15);color:var(--bad);border:1px solid var(--bad)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px;margin:10px 0}
+.mut{color:var(--mut)}.kv{display:grid;grid-template-columns:220px 1fr;gap:4px 12px}
+.warnbox{background:rgba(210,153,34,.1);border:1px solid var(--warn);border-radius:8px;padding:12px 16px;margin:16px 0;color:#f0d68a}
+</style></head><body>
+<h1>Actenon ShipGuard <span class="tag">repair loop</span></h1>
+<p class="sub">Your AI agent says it's done. ShipGuard checks before it ships. &mdash; agent: <code>codex</code> &middot; LIVE coding agent</p>
+
+<div class="card"><div class="kv">
+<div class="mut">Task</div><div>In src/settle.ts, fix splitProportional so it splits a whole-pence total across parties in proportion to integer weights using the largest-remainder (Hamilton) method: floor each exact quota, then award the leftover pennies one each to the parties with the largest fractional quota, breaking ties toward the lower index, so the shares always sum exactly to the total. Edit only src/settle.ts.</div>
+<div class="mut">Final status</div><div><span class="pill allow">VERIFIED</span></div>
+<div class="mut">Approved contract digest</div><div><code>5d061533c23badda59aab432913df1737846ed81e4a3686bc3c0e6b8cc9f4d07</code></div>
+<div class="mut">Verified candidate git head</div><div><code>b5abd271eff32f24f56ecd8f4e4d906f45029fa6</code></div>
+</div></div>
+
+
+
+<h2>Lifecycle</h2>
+<p class="mut"><code>INTENT → APPROVED_CONTRACT → BASELINE → CODEBASE_MODEL → AGENT_CHANGE → ORDINARY_TESTS → INDEPENDENT_CHALLENGE → REVERIFICATION → ATTESTATION_READY</code></p>
+
+<h2>Attempts (agent change → ordinary tests → independent Sentinel verification)</h2>
+<table><thead><tr><th>#</th><th>Agent outcome</th><th>Ordinary tests</th><th>Sentinel verdict</th><th>Requirements</th></tr></thead>
+<tbody><tr><td>0</td><td>completed<div class='mut'>Updated only `src/settle.ts` to floor quotas and award leftover pennies by largest remainder, breaking ties toward the lower index.
+
+Validation passed: 3 existi</div></td><td>passed<div class='mut'>[2m      Tests [22m [1m[32m3 passed[39m[22m[90m (3)[39m</div></td><td><span class='pill allow'>VERIFIED</span><div class='mut'>receipt b0b8c890f9fb</div></td><td class='mut'>{&#x27;conserve-total&#x27;: &#x27;VERIFIED&#x27;, &#x27;largest-remainder-order&#x27;: &#x27;VERIFIED&#x27;, &#x27;preserve-trivial&#x27;: &#x27;VERIFIED&#x27;}</td></tr></tbody></table>
+
+<h2>Independent counterexample (what ordinary tests missed)</h2>
+<p class='mut'>No outstanding counterexample (either verified, or the defect was not reproduced).</p>
+
+<h2>Verification bindings (structured Sentinel receipt)</h2>
+<div class="card"><div class="kv"><div class='mut'>contractHash</div><div><code>28eddf9e36440238501e68e70823376a9c724243d36dd42e49b4b2cfb990a587</code></div><div class='mut'>candidateHash</div><div><code>2a78eee11b19f7561300fd095574acabdfa43e554fa3c16c5d263efb1a4a3612</code></div><div class='mut'>baselineHash</div><div><code>1ff047ba65d455ead3056b591973a2c1953d420b16390597e9514796f82d1470</code></div><div class='mut'>git_head</div><div><code>e2938fe3f31698b0b1f86a4510bf22dccbd6f0da</code></div><div class='mut'>git_branch</div><div><code>main</code></div><div class='mut'>git_dirty</div><div><code>True</code></div><div class='mut'>runner</div><div><code>local-advisory</code></div><div class='mut'>verifierVersion</div><div><code>1.0.0</code></div><div class='mut'>vitest</div><div><code>5.0.5</code></div><div class='mut'>node</div><div><code>v26.12.0</code></div><div class='mut'>workerSha256</div><div><code>c16009148648f57d65398d7741a6d805170a278ea3329f781dc4d005bb2c85ad</code></div></div></div>
+
+<h2>What this proves &mdash; and what it does not</h2>
+<div class="card"><ul>
+<li><strong>Proves:</strong> the final status was decided by independent Sentinel verification against a
+developer-approved contract held out from the agent &mdash; not by the agent's own success claim or by its
+ordinary tests. A contradicted requirement produced a reproducible counterexample; a verified repair
+passed every approved requirement with full git + toolchain identity bound.</li>
+<li><strong>Does not prove:</strong> arbitrary correctness beyond the approved examples/invariant seeds;
+that a rogue agent which refuses to participate is stopped (this is a cooperative boundary). The
+<code>local</code> runner executes candidate code under the same OS account and is advisory, not a
+security sandbox.</li>
+</ul></div>
+<p class="mut">Generated offline by actenon-shipguard. No external assets, no network, no telemetry.</p>
+</body></html>

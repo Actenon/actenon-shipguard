@@ -190,7 +190,7 @@ def _select_adapter(name: str):
     return OfflineAdapter()
 
 
-_EXIT_BY_STATUS = {"verified": 0, "contradicted": 1, "environment_failure": 2,
+_EXIT_BY_STATUS = {"verified": 0, "contradicted": 1, "no_change": 1, "environment_failure": 2,
                    "interrupted": 2, "unverified": 1}
 
 
@@ -229,12 +229,15 @@ def cmd_run(args) -> int:
 
     out = Path(args.out)
     work = out / "tmp"                      # disposable (gitignored): candidate repo + verifier store
+    approved = Path(args.contract).expanduser() if args.contract else None
     rec = run_task(task=task, adapter=adapter, work=work, sentinel_cli=sentinel_cli,
-                   node_modules=node_modules, max_attempts=args.max_attempts,
-                   agent_timeout=args.agent_timeout, runner=args.runner, evidence_dir=out)
+                   approved_contract=approved, node_modules=node_modules,
+                   max_attempts=args.max_attempts, agent_timeout=args.agent_timeout,
+                   runner=args.runner, evidence_dir=out)
 
-    # Preserve the final structured Sentinel receipt as a durable, selected reproducibility artifact.
-    _preserve_sentinel_receipt(work / "verifier-store", out)
+    # Durable evidence: the run-record embeds the Sentinel receipt hash, bindings, verdicts and
+    # counterexamples. The raw content-addressed receipt stays in the gitignored tmp store (it binds
+    # absolute paths and is reproducible by re-running); we do not copy it into public evidence.
     report = write_run_report(rec.to_dict(), out / "shipguard-run-report.html")
 
     # Actionable terminal summary.
@@ -256,28 +259,6 @@ def cmd_run(args) -> int:
     code = _EXIT_BY_STATUS.get(rec.final_status, 1)
     print(f"RUN RESULT: {rec.final_status.upper()} (exit {code})")
     return code
-
-
-def _preserve_sentinel_receipt(store: Path, out: Path) -> None:
-    """Copy the latest structured Sentinel receipt into the durable evidence dir (portable paths)."""
-    try:
-        lv = store / "latest-verification.json"
-        if not lv.exists():
-            return
-        ptr = json.loads(lv.read_text())
-        rh = ptr.get("receipt")
-        obj = store / "objects" / rh
-        if rh and obj.exists():
-            (out / "sentinel").mkdir(parents=True, exist_ok=True)
-            (out / "sentinel" / f"receipt-{rh}.json").write_bytes(obj.read_bytes())
-            (out / "sentinel" / "latest-verification.json").write_text(
-                json.dumps({"schemaVersion": ptr.get("schemaVersion", 1), "receipt": rh,
-                            "report": f"receipt-{rh}.html"}, indent=2) + "\n")
-            rep = ptr.get("report")
-            if rep and Path(rep).exists():
-                (out / "sentinel" / f"receipt-{rh}.html").write_bytes(Path(rep).read_bytes())
-    except Exception:
-        pass
 
 
 def _open(path: Path) -> None:
@@ -318,6 +299,8 @@ def main(argv=None) -> int:
                    help="Sentinel verification runner (local is advisory; docker isolates)")
     p.add_argument("--sentinel", default=None, help="path to sentinel CLI (or set SHIPGUARD_SENTINEL)")
     p.add_argument("--node-modules", default=None, help="node_modules providing vitest (or set SHIPGUARD_NODE_MODULES)")
+    p.add_argument("--contract", default=None,
+                   help="path to the developer-approved Sentinel acceptance contract (held out from the agent)")
     p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_run)
 
     args = ap.parse_args(argv)

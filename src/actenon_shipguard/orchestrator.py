@@ -65,12 +65,19 @@ class RunRecord:
         return d
 
 
-def setup_repo(work: Path, node_modules: Path) -> Path:
-    """Create a candidate repo at the BUGGY baseline (floor split) with weak ordinary tests."""
+def setup_repo(work: Path, node_modules: Path, *, baseline: str = "baseline-buggy.ts",
+               module: str = MODULE, test_src: str = "target-settlement/src/settle.test.ts",
+               test_dest: str = "src/settle.test.ts") -> Path:
+    """Create a candidate repo at a buggy baseline with weak ordinary tests.
+
+    Parameterised by task so the loop is not hard-wired to the two-int settlement shape
+    (a first step toward the resource-adapter generalisation).
+    """
     repo = work / f"repo-{uuid.uuid4().hex[:8]}"
-    (repo / "src").mkdir(parents=True)
-    shutil.copy(FIXTURES / "candidates" / "baseline-buggy.ts", repo / MODULE)
-    shutil.copy(FIXTURES / "target-settlement" / "src" / "settle.test.ts", repo / "src" / "settle.test.ts")
+    (repo / Path(module).parent).mkdir(parents=True, exist_ok=True)
+    shutil.copy(FIXTURES / "candidates" / baseline, repo / module)
+    (repo / Path(test_dest).parent).mkdir(parents=True, exist_ok=True)
+    shutil.copy(FIXTURES / test_src, repo / test_dest)
     (repo / "package.json").write_text(json.dumps(
         {"name": "settlement", "private": True, "type": "module", "scripts": {"test": "vitest run"}}))
     # node_modules must stay OUT of the git baseline: Sentinel snapshots tracked files and rejects
@@ -80,7 +87,7 @@ def setup_repo(work: Path, node_modules: Path) -> Path:
     if node_modules and Path(node_modules).exists():
         (repo / "node_modules").symlink_to(Path(node_modules), target_is_directory=True)
     for args in (["init", "-q"], ["config", "user.email", "sg@shipguard.local"], ["config", "user.name", "shipguard"],
-                 ["add", "-A"], ["commit", "-qm", "baseline: floor-split allocation (loses pennies on uneven splits)"]):
+                 ["add", "-A"], ["commit", "-qm", f"baseline: buggy {Path(module).stem}"]):
         subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
     return repo
 
@@ -164,7 +171,9 @@ def _model_codebase(repo: Path, target_file: str, export: str) -> dict[str, Any]
 def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_contract: Path | None = None,
              node_modules: Path | None = None, max_attempts: int = 2, agent_timeout: int = 240,
              baseline: str = "HEAD", runner: str = "local", evidence_dir: Path | None = None,
-             target_file: str = MODULE, export: str = EXPORT) -> RunRecord:
+             target_file: str = MODULE, export: str = EXPORT, baseline_fixture: str = "baseline-buggy.ts",
+             test_src: str = "target-settlement/src/settle.test.ts",
+             test_dest: str = "src/settle.test.ts") -> RunRecord:
     work = Path(work); work.mkdir(parents=True, exist_ok=True)
     # The approved Sentinel acceptance contract is HELD OUT from the agent (lives in the package /
     # a verifier dir, never inside the candidate repo) and is not generated from the agent's output.
@@ -193,9 +202,10 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
         rec.final_status = "environment_failure"
         _write(rec); return rec
 
-    repo = setup_repo(work, node_modules)
+    repo = setup_repo(work, node_modules, baseline=baseline_fixture, module=target_file,
+                      test_src=test_src, test_dest=test_dest)
     rec.git_head = git_head(repo)
-    go("BASELINE", repo=str(repo), git_head=rec.git_head, note="buggy floor-split baseline; weak ordinary tests")
+    go("BASELINE", repo=str(repo), git_head=rec.git_head, note=f"buggy baseline ({baseline_fixture}); weak ordinary tests")
     go("CODEBASE_MODEL", **_model_codebase(repo, target_file, export))
 
     cx = None
@@ -212,10 +222,12 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
             rec.attempts.append({"attempt": attempt, "agent": asdict(res), "status": rec.final_status})
             _write(rec); return rec
         if res.outcome == "failed" or not res.made_change:
+            # Distinct from "contradicted": the agent produced NO change (it may have asked for
+            # clarification or declined). Honest status — not an independent contradiction.
             rec.attempts.append({"attempt": attempt, "agent": asdict(res), "status": "no_change"})
-            rec.final_status = "contradicted"
+            rec.final_status = "no_change"
             go("REVERIFICATION", attempt=attempt, verdict="NO_CHANGE",
-               note="agent made no change; not verified")
+               note="agent made no change (possibly awaiting clarification); nothing independently verified")
             _write(rec); return rec
 
         # Integrity guard: the agent must not have tampered with the held-out acceptance contract.
@@ -269,6 +281,21 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
     return rec
 
 
+def _portable(s: str) -> str:
+    """Scrub absolute local paths from public evidence (P2 hygiene): the bundled fixtures dir, the
+    project root, the home dir, and ephemeral temp work dirs. Essential evidence (git SHAs, receipt
+    hashes, counterexamples, verdicts, agent statements) is untouched — only filesystem paths are
+    tokenised. Most-specific roots are replaced first so no project structure leaks via ``~``."""
+    import re
+    proj = Path(__file__).resolve().parents[2]          # the actenon-shipguard repo root
+    for root, tok in ((FIXTURES.resolve(), "<bundled>"), (FIXTURES, "<bundled>"),
+                      (proj.resolve(), "<project>"), (proj, "<project>"),
+                      (Path.home(), "~")):
+        s = s.replace(str(root), tok)
+    s = re.sub(r"/(?:private/)?tmp/[A-Za-z0-9._/-]+", "<work>", s)
+    return s
+
+
 def _write(rec: RunRecord) -> None:
     out = Path(rec.evidence_dir); out.mkdir(parents=True, exist_ok=True)
-    (out / "run-record.json").write_text(json.dumps(rec.to_dict(), indent=2) + "\n")
+    (out / "run-record.json").write_text(_portable(json.dumps(rec.to_dict(), indent=2)) + "\n")

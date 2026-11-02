@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "objective": "Allocate every penny of a settlement total across parties with a deterministic largest-remainder distribution so no penny is created or destroyed. Per the ledger team's approved rule, any leftover remainder pennies are credited to the FINAL parties (the last party is the house/settling account that absorbs the rounding difference). Even splits and pence formatting are preserved.",
+  "approvedBy": "Settlement ledger acceptance specification (reviewed) — house account absorbs remainder",
+  "allowedPaths": [
+    "src/settle.ts"
+  ],
+  "requirements": [
+    {
+      "id": "remainder-to-final-parties",
+      "kind": "must-change",
+      "description": "Uneven splits conserve the total exactly; the remainder pennies go to the FINAL parties (house/settling account is last), not the leading ones",
+      "module": "src/settle.ts",
+      "export": "allocate",
+      "cases": [
+        { "args": [100, 3], "expected": [33, 33, 34] },
+        { "args": [10, 3], "expected": [3, 3, 4] },
+        { "args": [1, 3], "expected": [0, 0, 1] },
+        { "args": [7, 2], "expected": [3, 4] },
+        { "args": [1000000, 7], "expected": [142857, 142857, 142857, 142857, 142857, 142857, 142858] }
+      ]
+    },
+    {
+      "id": "no-created-penny",
+      "kind": "must-change",
+      "description": "Rounding must never over-allocate beyond the total (no penny created out of thin air)",
+      "module": "src/settle.ts",
+      "export": "allocate",
+      "cases": [
+        { "args": [5, 2], "expected": [2, 3] },
+        { "args": [3, 2], "expected": [1, 2] }
+      ]
+    },
+    {
+      "id": "preserve-even-splits",
+      "kind": "must-preserve",
+      "description": "Even splits are unchanged",
+      "module": "src/settle.ts",
+      "export": "allocate",
+      "cases": [
+        { "args": [100, 4], "expected": [25, 25, 25, 25] },
+        { "args": [100, 2], "expected": [50, 50] },
+        { "args": [50, 1], "expected": [50] }
+      ]
+    },
+    {
+      "id": "preserve-formatting",
+      "kind": "must-preserve",
+      "description": "Pence formatting is unchanged",
+      "module": "src/settle.ts",
+      "export": "formatPence",
+      "cases": [
+        { "args": [1234], "expected": "£12.34" },
+        { "args": [0], "expected": "£0.00" }
+      ]
+    }
+  ],
+  "probes": [
+    {
+      "id": "unchanged-formatting",
+      "module": "src/settle.ts",
+      "export": "formatPence",
+      "inputs": [[9999], [1]]
+    }
+  ]
+}

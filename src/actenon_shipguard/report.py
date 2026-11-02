@@ -85,8 +85,8 @@ def write_demo_report(summary: dict, path: Path) -> Path:
     return path
 
 
-_STATUS_CLASS = {"verified": "allow", "contradicted": "refuse", "environment_failure": "refuse",
-                 "interrupted": "refuse", "unverified": "refuse"}
+_STATUS_CLASS = {"verified": "allow", "contradicted": "refuse", "no_change": "refuse",
+                 "environment_failure": "refuse", "interrupted": "refuse", "unverified": "refuse"}
 
 
 def render_run_report(rec: dict) -> str:
