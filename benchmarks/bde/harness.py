@@ -236,8 +236,8 @@ def freeze(engine_commit: str) -> dict[str, Any]:
                 "splitByCase:unjustified_boundary": "TRUE_DELAYED_FIX",
             },
             "audit_evidence": {
-                "isScriptProtocol": "tsx -e 'import {isScriptProtocol} from "./src/index.ts"; "
-                                     "console.log(isScriptProtocol("javascript:alert(1)"))' -> false, "
+                "isScriptProtocol": "tsx -e 'import {isScriptProtocol} from \"./src/index.ts\"; "
+                                     "console.log(isScriptProtocol(\"javascript:alert(1)\"))' -> false, "
                                      "while README/JSDoc document `// true`",
                 "normalizeURL": "README documents 'test?query=123%20123#hash,%20test'; the code returns "
                                 "'test?query=123+123#hash,%20test' (space -> + vs %20)",
