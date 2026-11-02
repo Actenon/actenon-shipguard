@@ -68,7 +68,8 @@ class ScriptedAdapter:
                            raw={"NOTE": "deterministic test adapter, NOT a live model repair"})
 
 
-def _make_real_repo(dest: Path, *, with_package_json: bool = True, with_tests: bool = True) -> Path:
+def _make_real_repo(dest: Path, *, with_package_json: bool = True, with_tests: bool = True,
+                    gitignore: str = "node_modules\n", real_node_modules: bool = False) -> Path:
     """Construct a small but genuine developer repository with Git history and its own tests."""
     (dest / "src").mkdir(parents=True, exist_ok=True)
     shutil.copy(FIXTURES / "candidates" / "baseline-buggy.ts", dest / MODULE)
@@ -78,8 +79,12 @@ def _make_real_repo(dest: Path, *, with_package_json: bool = True, with_tests: b
         (dest / "package.json").write_text(json.dumps(
             {"name": "payments-ledger", "private": True, "type": "module",
              "scripts": {"test": "vitest run"}}))
-    (dest / ".gitignore").write_text("node_modules\n")
-    (dest / "node_modules").symlink_to(NODE_MODULES, target_is_directory=True)
+    (dest / ".gitignore").write_text(gitignore)
+    if real_node_modules:            # what a genuine local install looks like: a real directory
+        (dest / "node_modules" / ".keep").parent.mkdir(parents=True)
+        (dest / "node_modules" / ".keep").write_text("")
+    else:
+        (dest / "node_modules").symlink_to(NODE_MODULES, target_is_directory=True)
     for a in (["init", "-q"], ["config", "user.email", "dev@example.com"], ["config", "user.name", "dev"],
               ["add", "-A"], ["commit", "-qm", "initial commit: settlement service"],
               ["commit", "--allow-empty", "-qm", "chore: add CI config"]):
@@ -131,6 +136,30 @@ def test_clone_isolated_does_not_touch_the_original(tmp_path):
                          text=True, check=True).stdout.strip().splitlines()
     assert len(log) == 2 and "initial commit" in log[-1]
     assert (clone / "node_modules").exists()
+
+
+def test_clone_isolated_keeps_symlinked_node_modules_untracked_even_with_slashed_gitignore(tmp_path):
+    """`node_modules/` does not match a symlink, and Sentinel rejects a tracked node_modules entry.
+
+    Real repositories commonly ignore `node_modules/` with a trailing slash. The isolated clone must
+    still keep the shared dependency symlink out of Git — without rewriting any tracked file.
+    """
+    repo = _make_real_repo(tmp_path / "proj", gitignore="dist\nnode_modules/\n",
+                           real_node_modules=True)
+    before = repo_fingerprint(repo)
+    clone = clone_isolated(repo, tmp_path / "work", NODE_MODULES)
+
+    assert (clone / "node_modules").is_symlink()
+    tracked = subprocess.run(["git", "-C", str(clone), "ls-files"], capture_output=True,
+                             text=True, check=True).stdout.split()
+    assert not [f for f in tracked if f.split("/")[0] == "node_modules"], tracked
+    status = subprocess.run(["git", "-C", str(clone), "status", "--porcelain"], capture_output=True,
+                            text=True, check=True).stdout.strip()
+    assert status == "", f"the dependency symlink leaked into the working tree: {status}"
+    # the fix is local to the clone: the developer's own .gitignore is untouched
+    assert (repo / ".gitignore").read_text() == "dist\nnode_modules/\n"
+    assert (clone / ".gitignore").read_text() == "dist\nnode_modules/\n"
+    assert repo_fingerprint(repo) == before
 
 
 # --------------------------------------------------------------------------- #

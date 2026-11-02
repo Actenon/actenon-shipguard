@@ -179,6 +179,21 @@ def inspect_project(repo: Path, module: str, export: str) -> dict[str, Any]:
     return info
 
 
+def exclude_node_modules(repo: Path) -> None:
+    """Keep a node_modules SYMLINK out of Git without touching any tracked file.
+
+    ``node_modules/`` — the form many real .gitignore files use — does not match a symlink, and
+    Sentinel rejects a node_modules entry in the baseline snapshot outright ("Unsupported baseline
+    file"). ``.git/info/exclude`` is local to this clone, so no diff appears in the working tree and
+    the developer's .gitignore is never rewritten.
+    """
+    exc = Path(repo) / ".git" / "info" / "exclude"
+    exc.parent.mkdir(parents=True, exist_ok=True)
+    lines = [ln.strip() for ln in exc.read_text().splitlines()] if exc.exists() else []
+    if "node_modules" not in lines:
+        exc.write_text("\n".join([*(ln for ln in lines if ln), "node_modules"]) + "\n")
+
+
 def clone_isolated(src_repo: Path, work: Path, node_modules: Path | None = None) -> Path:
     """Create a DISPOSABLE isolated working copy of a real developer repository.
 
@@ -194,6 +209,7 @@ def clone_isolated(src_repo: Path, work: Path, node_modules: Path | None = None)
     nm_src = Path(node_modules) if node_modules else (src_repo / "node_modules")
     if nm_src.exists() and not (dest / "node_modules").exists():
         (dest / "node_modules").symlink_to(nm_src, target_is_directory=True)
+        exclude_node_modules(dest)
     return dest
 
 

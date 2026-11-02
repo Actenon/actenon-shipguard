@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,8 +22,14 @@ import yaml
 import actenon_shipguard as _sg
 from actenon_shipguard.orchestrator import is_detected_defect, validate_change_scope
 from actenon_shipguard.sentinel import (
-    ACCEPT_STATUS, MANDATORY_TEST_CHECKS, SUPPORTED_RUNNERS, SUPPORTED_STATUSES,
-    bind_committed_tree, evaluate_receipt, find_sentinel, run_sentinel_verify,
+    ACCEPT_STATUS,
+    MANDATORY_TEST_CHECKS,
+    SUPPORTED_RUNNERS,
+    SUPPORTED_STATUSES,
+    bind_committed_tree,
+    evaluate_receipt,
+    find_sentinel,
+    run_sentinel_verify,
 )
 
 _PKG_DIR = Path(_sg.__file__).resolve().parent
@@ -371,16 +379,17 @@ def test_negative_control_failing_pytest_cannot_be_masked_by_tee(tmp_path):
     """A failing test among passing ones must fail the step; the old un-piped pattern hid it."""
     (tmp_path / "test_mixed.py").write_text(
         "def test_passes():\n    assert True\n\ndef test_fails():\n    assert False\n")
+    py = shlex.quote(sys.executable)          # a bare `python` may not exist on PATH at all
     # The pre-fix CI pattern: `pytest | tee` under bash -e (no pipefail) -> tee's 0 masks pytest.
     old = subprocess.run(["bash", "-e", "-c",
-                          f"python -m pytest -q -p no:cacheprovider {tmp_path} 2>&1 | tee /tmp/_old.txt"],
+                          f"{py} -m pytest -q -p no:cacheprovider {tmp_path} 2>&1 | tee /tmp/_old.txt"],
                          capture_output=True, text=True)
+    assert "1 failed" in old.stdout, f"the negative control did not actually run pytest: {old.stdout[-400:]}"
     assert old.returncode == 0, "sanity: without pipefail the failure IS masked (the bug being fixed)"
-    assert "1 failed" in old.stdout
     # The hardened pattern now used in ci.yml.
     new = subprocess.run(
         ["bash", "-c",
-         f'set -euo pipefail; set +e; python -m pytest -q -p no:cacheprovider {tmp_path} 2>&1 '
+         f'set -euo pipefail; set +e; {py} -m pytest -q -p no:cacheprovider {tmp_path} 2>&1 '
          '| tee /tmp/_new.txt; code=${PIPESTATUS[0]}; set -e; test "$code" -eq 0'],
         capture_output=True, text=True)
     assert new.returncode != 0, "a failing pytest must fail the CI step even though another test passed"
