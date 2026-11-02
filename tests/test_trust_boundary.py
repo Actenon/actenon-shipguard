@@ -25,13 +25,20 @@ from actenon_shipguard import (
 )
 from actenon_shipguard.certs import verify_certificate
 from actenon_shipguard.proofs import AuthorityVerifier
+from actenon_shipguard.receipts import sign_receipt_attestation
 from actenon_shipguard.cli import _find_tsx
+from actenon_shipguard.nonce import ReconciliationVerifier, sign_reconciliation_statement, RESERVED
+from actenon_shipguard.trust import (
+    sign_domain, verify_domain, DOMAIN_CORRECTNESS_CERT, DOMAIN_RECONCILIATION,
+)
 
-PKG = Path(__file__).resolve().parents[1]
-FIXTURES = PKG / "fixtures"
+import actenon_shipguard as _sg
+_PKG_DIR = Path(_sg.__file__).resolve().parent          # the INSTALLED package dir (wheel or editable)
+PKG = Path(__file__).resolve().parents[1]                # repo root (lab-relative tsx fallback only)
+FIXTURES = _PKG_DIR / "_bundled"                         # packaged resources, not repo-relative
 # Resolve tsx portably: SHIPGUARD_TSX env, PATH (CI installs it globally), or the lab sibling repo.
 TSX = _find_tsx(None)
-PROPERTY_VERIFY = PKG / "src" / "actenon_shipguard" / "property_verify.mjs"
+PROPERTY_VERIFY = _PKG_DIR / "property_verify.mjs"
 MODULE = "src/settle.ts"
 EXPORT = "allocate"
 
@@ -57,7 +64,8 @@ def put_object(store: Path, payload: bytes) -> str:
 # --------------------------------------------------------------------------- #
 def build_sentinel_store(store: Path, repo: Path, contract: dict, *, status="VERIFIED",
                          check_status="VERIFIED", head: str | None = None,
-                         contract_override: dict | None = None) -> str:
+                         contract_override: dict | None = None, checks_override=None,
+                         verifier_kp=None) -> str:
     store = Path(store); store.mkdir(parents=True, exist_ok=True)
     src = (repo / MODULE).read_bytes()
     file_hash = put_object(store, src)
@@ -67,12 +75,17 @@ def build_sentinel_store(store: Path, repo: Path, contract: dict, *, status="VER
     candidate_hash = put_object(store, json.dumps(snapshot, sort_keys=True).encode())
     stored_contract = contract_override if contract_override is not None else contract
     contract_hash = put_object(store, json.dumps(stored_contract, sort_keys=True).encode())
-    checks = [{"id": "req-1", "label": "behaviour", "status": check_status, "detail": "", "requirementId": "valid-ages"}]
+    checks = checks_override if checks_override is not None else [
+        {"id": f"check-{r['id']}", "label": str(r.get("description", r["id"]))[:60],
+         "status": check_status, "detail": "", "requirementId": r["id"]}
+        for r in contract.get("requirements", [])]
     receipt = {"schemaVersion": 1, "id": str(uuid.uuid4()), "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                "objective": contract.get("objective", ""), "baselineHash": candidate_hash, "candidateHash": candidate_hash,
                "contractHash": contract_hash, "git": snapshot["git"], "runner": "local-advisory",
                "runtime": {"verifierVersion": "1.0.0", "workerSha256": "w" * 64, "node": "v22"},
                "checks": checks, "changes": [], "status": status, "durationMs": 1, "limitations": [], "nextActions": []}
+    if verifier_kp is not None:
+        receipt = sign_receipt_attestation(verifier_kp, receipt)
     receipt_hash = put_object(store, json.dumps(receipt, sort_keys=True).encode())
     (store / "latest-verification.json").write_text(json.dumps({"schemaVersion": 1, "receipt": receipt_hash, "report": ""}))
     return receipt_hash
@@ -133,9 +146,11 @@ def make_action(tmp_path, trust, contract, candidate, *, status="VERIFIED", chec
     head = _git_head(repo)
     store = tmp_path / f"store-{uuid.uuid4().hex[:6]}"
     receipt_hash = build_sentinel_store(store, repo, contract, status=status, check_status=check_status,
-                                        head=head, contract_override=contract_override)
-    rv = verify_sentinel_receipt(store=store, approved_contract=json.dumps(contract) and _contract_file(tmp_path, contract),
-                                 candidate_repo=repo, module_path=MODULE, expected_head=head)
+                                        head=head, contract_override=contract_override,
+                                        verifier_kp=keypairs["verifier"])
+    rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
+                                 candidate_repo=repo, module_path=MODULE, expected_head=head,
+                                 verifier_roots=roots)
     prop = run_property(code_for_exec or (repo / MODULE), tmp_path)
     cert = build_certificate(prover=prover, code_path=repo / MODULE, module_path=MODULE, export=EXPORT,
                              property_report=prop, receipt=rv, contract_digest=sha(json.dumps(contract, sort_keys=True).encode()),
@@ -161,10 +176,9 @@ def _contract_file(tmp_path, contract) -> Path:
 def make_gate(tmp_path, action, tsx=TSX):
     nonce_store = NonceStore(tmp_path / f"nonces-{uuid.uuid4().hex[:6]}.db")
     out_dir = tmp_path / f"out-{uuid.uuid4().hex[:6]}"
-    resource = ProtectedResource(trust_roots=action["roots"], authority_key_id=action["issuer"].key_id,
-                                 tsx=tsx, out_dir=out_dir)
-    gate = EdgeGate(trust_roots=action["roots"], issuer_signer=action["issuer"], nonce_store=nonce_store,
-                    resource=resource, ledger=out_dir / "ledger.jsonl")
+    resource = ProtectedResource(trust_roots=action["roots"], tsx=tsx, out_dir=out_dir,
+                                 nonce_store=nonce_store, ledger=out_dir / "ledger.jsonl")
+    gate = EdgeGate(resource=resource)
     return gate, nonce_store, resource, out_dir
 
 
@@ -300,15 +314,21 @@ def test_nonce_store_survives_restart(tmp_path):
     s2.close()
 
 
-def test_bypass_resource_without_authorization_refused(tmp_path, trust, contract):
+def test_enforcer_keyless_and_tampered_proof_refused(tmp_path, trust, contract):
+    import copy
     a = make_action(tmp_path, trust, contract, ARM_B)
     gate, nonces, resource, out = make_gate(tmp_path, a)
-    from actenon_shipguard.gate import GateAuthorization
-    forged = GateAuthorization(nonce="x", code_artifact_sha256=a["cert"].code_artifact_sha256, module_path=MODULE,
-                               export=EXPORT, parameters={"total_pence": 1000000, "parties": 3}, resource_id="ledger-1",
-                               expires_at="2099-01-01T00:00:00Z", signature="")
-    with pytest.raises(PermissionError):
-        resource.execute(forged, a["code"])  # no valid issuer signature -> refused, no side effect
+    # P0 signing separation: the enforcer / protected resource holds NO private signing material.
+    assert resource.holds_signing_key() is False
+    assert not hasattr(gate, "_issuer") and not hasattr(gate, "_signer")
+    # The only execute path re-verifies the primary evidence; a tampered proof is refused, no side effect.
+    tampered = copy.deepcopy(a["pccb"]); tampered["action"]["parameters"]["total_pence"] = 999
+    d = resource.verify_and_execute(
+        intent_payload=a["intent"], pccb_payload=tampered, cert=a["cert"], code_path=a["code"],
+        module_path=MODULE, export=EXPORT,
+        parameters={"total_pence": 999, "parties": 3, "allocation_id": "alloc-1"},
+        resource_id="ledger-1", now=a["now"])
+    assert d.decision == "REFUSE" and d.layer == "AUTHORITY", d
     assert not (out / "disbursement.json").exists()
 
 
@@ -318,3 +338,239 @@ def test_authority_proof_tamper_refused(tmp_path, trust, contract):
     gate, *_ = make_gate(tmp_path, a)
     d = run_gate(gate, a)
     assert d.decision == "REFUSE" and d.layer == "AUTHORITY", d  # action_hash no longer matches signature
+
+
+# --------------------------------------------------------------------------- #
+# P0 authorisation binding: executed action must EXACTLY equal the verified intent
+# --------------------------------------------------------------------------- #
+def _exec_with(gate, a, *, parameters=None, export=EXPORT, module_path=MODULE,
+               resource_id="ledger-1", code_path=None):
+    return gate.authorize_and_execute(
+        intent_payload=a["intent"], pccb_payload=a["pccb"], cert=a["cert"],
+        code_path=code_path or a["code"], module_path=module_path, export=export,
+        parameters=parameters or {"total_pence": 1000000, "parties": 3, "allocation_id": "alloc-1"},
+        resource_id=resource_id, now=a["now"])
+
+
+def test_refuse_small_authorisation_reused_for_larger_action(tmp_path, trust, contract):
+    # A valid proof authorises total_pence=1_000_000; the caller requests 100_000_000.
+    a = make_action(tmp_path, trust, contract, ARM_B)
+    gate, nonces, resource, out = make_gate(tmp_path, a)
+    d = _exec_with(gate, a, parameters={"total_pence": 100000000, "parties": 3, "allocation_id": "alloc-1"})
+    assert d.decision == "REFUSE" and d.layer == "AUTHORITY" and d.code == "INTENT_MISMATCH", d
+    assert not (out / "disbursement.json").exists()      # protected resource NEVER invoked
+    assert nonces.get(a["pccb"]["nonce"]) is None        # refused BEFORE nonce reservation / side effect
+
+
+def test_refuse_export_substitution_same_module(tmp_path, trust, contract):
+    # Certificate certifies export `allocate`; caller tries to execute a different export.
+    a = make_action(tmp_path, trust, contract, ARM_B)
+    gate, nonces, resource, out = make_gate(tmp_path, a)
+    d = _exec_with(gate, a, export="formatPence")
+    assert d.decision == "REFUSE" and d.code == "INTENT_MISMATCH", d
+    assert not (out / "disbursement.json").exists()
+    assert nonces.get(a["pccb"]["nonce"]) is None
+
+
+def test_refuse_resource_substitution(tmp_path, trust, contract):
+    a = make_action(tmp_path, trust, contract, ARM_B)
+    gate, nonces, resource, out = make_gate(tmp_path, a)
+    d = _exec_with(gate, a, resource_id="attacker-controlled-ledger")
+    assert d.decision == "REFUSE" and d.code == "INTENT_MISMATCH", d
+    assert not (out / "disbursement.json").exists()
+    assert nonces.get(a["pccb"]["nonce"]) is None
+
+
+def test_refuse_module_path_substitution(tmp_path, trust, contract):
+    a = make_action(tmp_path, trust, contract, ARM_B)
+    gate, nonces, resource, out = make_gate(tmp_path, a)
+    d = _exec_with(gate, a, module_path="src/other.ts")
+    assert d.decision == "REFUSE" and d.code == "INTENT_MISMATCH", d
+    assert not (out / "disbursement.json").exists()
+
+
+# --------------------------------------------------------------------------- #
+# P0 Sentinel receipt soundness: coverage, matching ids, no fabricated VERIFIED
+# --------------------------------------------------------------------------- #
+def test_receipt_zero_checks_rejected(tmp_path, contract):
+    repo = _git_init_candidate(tmp_path, ARM_B, contract)
+    head = _git_head(repo)
+    store = tmp_path / "store-zero"
+    build_sentinel_store(store, repo, contract, head=head, checks_override=[])
+    rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
+                                 candidate_repo=repo, module_path=MODULE, expected_head=head)
+    assert not rv.ok and any("zero checks" in r for r in rv.reasons), rv.reasons
+
+
+def test_receipt_unrelated_requirement_id_rejected(tmp_path, contract):
+    repo = _git_init_candidate(tmp_path, ARM_B, contract)
+    head = _git_head(repo)
+    store = tmp_path / "store-unrelated"
+    checks = [{"id": f"check-{r['id']}", "label": "x", "status": "VERIFIED", "detail": "", "requirementId": r["id"]}
+              for r in contract.get("requirements", [])]
+    checks.append({"id": "rogue", "label": "x", "status": "VERIFIED", "detail": "", "requirementId": "not-a-real-requirement"})
+    build_sentinel_store(store, repo, contract, head=head, checks_override=checks)
+    rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
+                                 candidate_repo=repo, module_path=MODULE, expected_head=head)
+    assert not rv.ok and any("not in the approved contract" in r for r in rv.reasons), rv.reasons
+
+
+def test_receipt_incomplete_coverage_rejected(tmp_path, contract):
+    reqs = contract.get("requirements", [])
+    if len(reqs) < 2:
+        pytest.skip("fixture contract needs >=2 requirements to test partial coverage")
+    repo = _git_init_candidate(tmp_path, ARM_B, contract)
+    head = _git_head(repo)
+    store = tmp_path / "store-partial"
+    # A single VERIFIED check for ONE requirement must not satisfy the whole contract.
+    one = [{"id": "check-x", "label": "x", "status": "VERIFIED", "detail": "", "requirementId": reqs[0]["id"]}]
+    build_sentinel_store(store, repo, contract, head=head, checks_override=one)
+    rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
+                                 candidate_repo=repo, module_path=MODULE, expected_head=head)
+    assert not rv.ok and any("no VERIFIED matching check" in r for r in rv.reasons), rv.reasons
+
+
+# --------------------------------------------------------------------------- #
+# P1 nonce reconciliation: trusted internal verifier, not a caller callback
+# --------------------------------------------------------------------------- #
+def _uncertain_store(tmp_path, roots):
+    store = NonceStore(tmp_path / "recon.db", recon_verifier=ReconciliationVerifier(roots, policy_revision="1"))
+    store.reserve(nonce="n-uncertain", pccb_id="pccb-1", effect_id="eff-1")
+    return store
+
+
+def test_reconciliation_valid_signed_evidence_resolves(tmp_path, trust):
+    roots, kp = trust
+    store = _uncertain_store(tmp_path, roots)
+    ev = sign_reconciliation_statement(kp["reconciliation"], nonce="n-uncertain", pccb_id="pccb-1",
+                                       effect_id="eff-1", resource_id="ledger-1", resolution="committed",
+                                       outcome={"confirmed_by": "resource-readback"}, policy_revision="1")
+    rec = store.reconcile(nonce="n-uncertain", resolution="committed", evidence=ev, resource_id="ledger-1")
+    assert rec.state == "committed"
+
+
+def test_reconciliation_forged_signer_rejected(tmp_path, trust):
+    roots, kp = trust
+    store = _uncertain_store(tmp_path, roots)
+    rogue = KeyPair.generate("reconciliation", "rogue-recon-v1")  # NOT pinned in trust roots
+    ev = sign_reconciliation_statement(rogue, nonce="n-uncertain", pccb_id="pccb-1", effect_id="eff-1",
+                                       resource_id="ledger-1", resolution="committed", outcome={"x": 1})
+    with pytest.raises(ReplayRefused) as ei:
+        store.reconcile(nonce="n-uncertain", resolution="committed", evidence=ev, resource_id="ledger-1")
+    assert ei.value.code == "RECONCILE_EVIDENCE_INVALID"
+    assert store.get("n-uncertain").state == RESERVED  # stays uncertain (fail closed)
+
+
+def test_reconciliation_wrong_effect_rejected(tmp_path, trust):
+    roots, kp = trust
+    store = _uncertain_store(tmp_path, roots)
+    ev = sign_reconciliation_statement(kp["reconciliation"], nonce="n-uncertain", pccb_id="pccb-1",
+                                       effect_id="DIFFERENT-effect", resource_id="ledger-1",
+                                       resolution="committed", outcome={"x": 1})
+    with pytest.raises(ReplayRefused) as ei:
+        store.reconcile(nonce="n-uncertain", resolution="committed", evidence=ev, resource_id="ledger-1")
+    assert ei.value.code == "RECONCILE_EVIDENCE_INVALID"
+    assert store.get("n-uncertain").state == RESERVED
+
+
+def test_reconciliation_no_callback_injection(tmp_path, trust):
+    # reconcile() accepts NO caller callback; arbitrary/forged evidence cannot resolve an uncertain nonce.
+    roots, kp = trust
+    store = _uncertain_store(tmp_path, roots)
+    forged = {"body": {"schema": "shipguard/reconciliation/v1", "nonce": "n-uncertain", "pccb_id": "pccb-1",
+                       "effect_id": "eff-1", "resource_id": "ledger-1", "resolution": "committed",
+                       "outcome": {}, "policy_revision": "1", "issued_at": "2099-01-01T00:00:00Z",
+                       "reconciler": "x"},
+              "key_id": kp["reconciliation"].key_id, "signature": "AAAAAAAAAAAAAAAA"}
+    with pytest.raises(ReplayRefused):
+        store.reconcile(nonce="n-uncertain", resolution="committed", evidence=forged, resource_id="ledger-1")
+    assert store.get("n-uncertain").state == RESERVED
+
+
+def test_reconciliation_unavailable_verifier_fails_closed(tmp_path, trust):
+    roots, kp = trust
+    store = NonceStore(tmp_path / "recon2.db")  # NO trusted verifier configured
+    store.reserve(nonce="n2", pccb_id="p", effect_id="e")
+    ev = sign_reconciliation_statement(kp["reconciliation"], nonce="n2", pccb_id="p", effect_id="e",
+                                       resource_id="ledger-1", resolution="committed", outcome={"x": 1})
+    with pytest.raises(ReplayRefused) as ei:
+        store.reconcile(nonce="n2", resolution="committed", evidence=ev, resource_id="ledger-1")
+    assert ei.value.code == "RECONCILE_UNAVAILABLE"
+    assert store.get("n2").state == RESERVED
+
+
+def test_cross_domain_signature_rejected(tmp_path, trust):
+    # A signature minted for the correctness-cert domain must not verify under the reconciliation domain.
+    roots, kp = trust
+    body = {"x": 1}
+    sig = sign_domain(kp["correctness"], DOMAIN_CORRECTNESS_CERT, body)
+    assert verify_domain(kp["correctness"].public_key, DOMAIN_CORRECTNESS_CERT, body, sig) is True
+    assert verify_domain(kp["correctness"].public_key, DOMAIN_RECONCILIATION, body, sig) is False
+
+
+def test_refabricated_and_rehashed_receipt_rejected(tmp_path, trust, contract):
+    # Decisive anti-fabrication control: an attacker flips a CONTRADICTED receipt to VERIFIED and
+    # CONSISTENTLY REHASHES it (new object key + repointed latest-verification), which defeats
+    # content-addressing. Only the isolated verifier-authority attestation catches it, because the
+    # attacker cannot re-sign the altered content without the verifier private key.
+    roots, kp = trust
+    repo = _git_init_candidate(tmp_path, ARM_B, contract)
+    head = _git_head(repo)
+    store = tmp_path / "store-refab"
+    build_sentinel_store(store, repo, contract, status="CONTRADICTED", check_status="CONTRADICTED",
+                         head=head, verifier_kp=kp["verifier"])
+    latest = json.loads((store / "latest-verification.json").read_text())
+    orig = json.loads((store / "objects" / latest["receipt"]).read_text())
+    assert orig["status"] == "CONTRADICTED"
+    forged = dict(orig)
+    forged["status"] = "VERIFIED"
+    forged["checks"] = [{**c, "status": "VERIFIED"} for c in forged["checks"]]
+    # attacker keeps the ORIGINAL attestation (cannot forge one over the altered content)
+    forged_bytes = json.dumps(forged, sort_keys=True).encode()
+    new_key = sha(forged_bytes)
+    (store / "objects" / new_key).write_bytes(forged_bytes)  # content-address now consistent
+    (store / "latest-verification.json").write_text(json.dumps({"schemaVersion": 1, "receipt": new_key, "report": ""}))
+    rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
+                                 candidate_repo=repo, module_path=MODULE, expected_head=head,
+                                 verifier_roots=roots)
+    assert not rv.ok and any("FABRICATION" in r for r in rv.reasons), rv.reasons
+
+
+def test_receipt_without_attestation_rejected_on_trusted_path(tmp_path, trust, contract):
+    # A synthetic receipt with NO verifier attestation must not qualify when a verifier root is required.
+    roots, kp = trust
+    repo = _git_init_candidate(tmp_path, ARM_B, contract)
+    head = _git_head(repo)
+    store = tmp_path / "store-noatt"
+    build_sentinel_store(store, repo, contract, head=head)  # verifier_kp omitted -> no attestation
+    rv = verify_sentinel_receipt(store=store, approved_contract=_contract_file(tmp_path, contract),
+                                 candidate_repo=repo, module_path=MODULE, expected_head=head,
+                                 verifier_roots=roots)
+    assert not rv.ok and any("no verifier-authority attestation" in r for r in rv.reasons), rv.reasons
+
+
+# --------------------------------------------------------------------------- #
+# P0 key-storage isolation: no private signing material in the agent workspace
+# --------------------------------------------------------------------------- #
+def test_init_keeps_private_keys_out_of_workspace(tmp_path):
+    from actenon_shipguard.cli import main
+    proj = tmp_path / "project"
+    keys = tmp_path / "external-keys"  # OUTSIDE the project workspace
+    assert main(["init", "--dir", str(proj), "--keys-dir", str(keys)]) == 0
+    assert (proj / ".shipguard" / "trust-roots.json").exists()   # public roots in workspace
+    assert list(proj.rglob("*.pem")) == []                        # NO private key in the workspace
+    assert len(list(keys.glob("*.pem"))) == 4                     # authority/correctness/reconciliation/verifier
+
+
+def test_init_refuses_keys_dir_inside_workspace(tmp_path):
+    from actenon_shipguard.cli import main
+    proj = tmp_path / "project"; proj.mkdir()
+    assert main(["init", "--dir", str(proj), "--keys-dir", str(proj / "keys")]) == 2
+
+
+def test_init_isolated_mode_fails_closed_without_custody(tmp_path, monkeypatch):
+    from actenon_shipguard.cli import main
+    monkeypatch.delenv("SHIPGUARD_KEY_CUSTODIAN", raising=False)
+    proj = tmp_path / "project-iso"
+    assert main(["init", "--dir", str(proj), "--enforcement", "isolated"]) == 2  # fails closed
+    assert list(proj.rglob("*.pem")) == []  # no keys minted when refusing the stronger mode

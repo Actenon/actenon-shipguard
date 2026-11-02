@@ -112,10 +112,10 @@ def build_certificate(
         "prover": {"role": ROLE_CORRECTNESS, "key_id": prover.key_id},  # key_id only — NO public key
         "issued_at": _utcnow_iso(),
     }
-    signature = prover.sign(canonicalize_bytes(body))
-    from .trust import b64u_encode
+    from .trust import sign_domain, DOMAIN_CORRECTNESS_CERT
+    signature = sign_domain(prover, DOMAIN_CORRECTNESS_CERT, body)  # versioned domain separation
     digest = sha256_hex(canonicalize_bytes(body))
-    return Certificate(body=body, signature=b64u_encode(signature), digest=digest)
+    return Certificate(body=body, signature=signature, digest=digest)
 
 
 @dataclass
@@ -125,8 +125,8 @@ class CertVerification:
 
 
 def verify_certificate(cert: Certificate, trust_roots: TrustRoots) -> CertVerification:
-    """Verify a certificate signature against the PINNED correctness trust root."""
-    from .trust import b64u_decode
+    """Verify a certificate signature against the PINNED correctness trust root, domain-separated."""
+    from .trust import verify_domain, DOMAIN_CORRECTNESS_CERT
     res = CertVerification(ok=True)
     try:
         root = trust_roots.resolve(ROLE_CORRECTNESS, cert.key_id)
@@ -134,11 +134,11 @@ def verify_certificate(cert: Certificate, trust_roots: TrustRoots) -> CertVerifi
         res.ok = False
         res.reasons.append(f"UNTRUSTED_PROVER: {e}")
         return res
-    try:
-        root.public_key().verify(b64u_decode(cert.signature), canonicalize_bytes(cert.body))
-    except Exception:
+    if not verify_domain(root.public_key(), DOMAIN_CORRECTNESS_CERT, cert.body, cert.signature):
         res.ok = False
-        res.reasons.append("CERT_SIGNATURE_INVALID: signature does not verify under the pinned correctness key")
+        res.reasons.append(
+            "CERT_SIGNATURE_INVALID: signature does not verify under the pinned correctness key "
+            "for the shipguard/correctness-cert/v1 domain (wrong key, tampered body, or cross-domain replay)")
         return res
     if sha256_hex(canonicalize_bytes(cert.body)) != cert.digest:
         res.ok = False

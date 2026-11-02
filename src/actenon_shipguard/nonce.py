@@ -15,13 +15,14 @@ exactly one wins the claim and the other is refused.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 RESERVED = "reserved"
 COMMITTED = "committed"
@@ -55,9 +56,73 @@ class NonceRecord:
         return self.state == RESERVED
 
 
+def sign_reconciliation_statement(keypair, *, nonce: str, pccb_id: str, effect_id: str,
+                                  resource_id: str, resolution: str, outcome: dict,
+                                  policy_revision: str = "1") -> dict:
+    """Operator-side: a canonical, versioned, DOMAIN-SEPARATED reconciliation statement.
+
+    Produced by the SEPARATE reconciliation authority (its own ed25519 identity) — never by the
+    enforcer or the coding agent. Binds the exact nonce, pccb, effect, resource, resolution,
+    outcome, policy revision and issuance time.
+    """
+    from .trust import DOMAIN_RECONCILIATION, sign_domain
+    body = {
+        "schema": "shipguard/reconciliation/v1",
+        "nonce": nonce, "pccb_id": pccb_id, "effect_id": effect_id, "resource_id": resource_id,
+        "resolution": resolution, "outcome": outcome, "policy_revision": str(policy_revision),
+        "issued_at": _utcnow(), "reconciler": keypair.key_id,
+    }
+    return {"body": body, "key_id": keypair.key_id,
+            "signature": sign_domain(keypair, DOMAIN_RECONCILIATION, body)}
+
+
+class ReconciliationVerifier:
+    """Trusted, internally-configured reconciliation verifier (NOT a caller-supplied callback).
+
+    Configured with PINNED reconciliation trust roots, so a caller cannot inject ``lambda: True``.
+    Verifies the domain-separated signature against the pinned reconciliation authority and binds
+    the statement to the exact nonce/pccb/effect/resource/resolution/policy plus a freshness window.
+    Any mismatch -> False, leaving the nonce uncertain (fail closed).
+    """
+
+    def __init__(self, trust_roots, *, policy_revision: str = "1", max_age_s: int = 300):
+        self._roots = trust_roots
+        self._policy_revision = str(policy_revision)
+        self._max_age_s = max_age_s
+
+    def verify(self, evidence: dict, *, nonce: str, pccb_id: str, effect_id: str,
+               resource_id: str, resolution: str) -> bool:
+        from .trust import DOMAIN_RECONCILIATION, ROLE_RECONCILIATION, verify_domain
+        try:
+            body = evidence["body"]; key_id = evidence["key_id"]; sig = evidence["signature"]
+        except (KeyError, TypeError):
+            return False
+        if body.get("schema") != "shipguard/reconciliation/v1":
+            return False
+        try:
+            root = self._roots.resolve(ROLE_RECONCILIATION, key_id)  # rejects unknown/unpinned signer
+        except Exception:
+            return False
+        if not verify_domain(root.public_key(), DOMAIN_RECONCILIATION, body, sig):
+            return False  # forged signature or cross-domain replay
+        if (body.get("nonce") != nonce or body.get("pccb_id") != pccb_id
+                or body.get("effect_id") != effect_id or body.get("resource_id") != resource_id
+                or body.get("resolution") != resolution):
+            return False  # evidence for a different effect / wrong resolution
+        if body.get("policy_revision") != self._policy_revision:
+            return False
+        try:
+            issued = datetime.fromisoformat(body["issued_at"].replace("Z", "+00:00"))
+        except Exception:
+            return False
+        age = (datetime.now(timezone.utc) - issued).total_seconds()
+        return not (age < -5 or age > self._max_age_s)  # reject future-dated or stale evidence
+
+
 class NonceStore:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, recon_verifier: "ReconciliationVerifier | None" = None):
         self.path = Path(path)
+        self._recon = recon_verifier  # trusted, internally configured; NOT a caller callback
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.path), timeout=30.0, isolation_level=None)
         # busy_timeout MUST be set before journal_mode: switching to WAL takes a brief
@@ -146,22 +211,34 @@ class NonceStore:
     def rollback(self, *, nonce: str, outcome: dict[str, Any]) -> NonceRecord:
         return self._resolve(nonce, ROLLED_BACK, outcome)
 
-    def reconcile(self, *, nonce: str, resolution: str, evidence: dict[str, Any]) -> NonceRecord:
-        """Resolve an UNCERTAIN reserved nonce using signed external evidence.
+    def reconcile(self, *, nonce: str, resolution: str, evidence: dict[str, Any],
+                  resource_id: str) -> NonceRecord:
+        """Resolve an UNCERTAIN reserved nonce using cryptographically verified evidence.
 
-        ``resolution`` must be 'committed' or 'rolled_back'; ``evidence`` must carry
-        a verifier/operator signature establishing whether the external effect really
-        occurred. This is the only safe way to clear an uncertain outcome — the side
-        effect is never blindly re-run.
+        Verification uses the internally-configured trusted ``ReconciliationVerifier`` (pinned
+        reconciliation authority) — NEVER a caller-supplied callback, so ``lambda: True`` cannot be
+        injected. The statement must bind the exact nonce/pccb/effect/resource/resolution and be
+        fresh. Any failure leaves the nonce uncertain (fail closed); the effect is never blind-retried.
         """
         if resolution not in (COMMITTED, ROLLED_BACK):
             raise ValueError("resolution must be 'committed' or 'rolled_back'")
-        if not evidence.get("signature") or not evidence.get("established_by"):
-            raise ReplayRefused("RECONCILE_EVIDENCE_MISSING", "reconcile requires signed evidence establishing the outcome")
         rec = self.get(nonce)
         if rec is None:
             raise ReplayRefused("NONCE_UNKNOWN", f"cannot reconcile unknown nonce {nonce}")
-        return self._resolve(nonce, resolution, {"reconciled": True, **evidence})
+        if rec.state != RESERVED:
+            raise ReplayRefused("RECONCILE_NOT_UNCERTAIN", f"nonce {nonce} is {rec.state}, not uncertain")
+        if self._recon is None:
+            raise ReplayRefused("RECONCILE_UNAVAILABLE",
+                                "no trusted reconciliation verifier configured; nonce stays uncertain (fail closed)")
+        if not self._recon.verify(evidence, nonce=nonce, pccb_id=rec.pccb_id, effect_id=rec.effect_id,
+                                  resource_id=resource_id, resolution=resolution):
+            raise ReplayRefused(
+                "RECONCILE_EVIDENCE_INVALID",
+                "reconciliation evidence failed cryptographic verification against the pinned reconciliation "
+                "trust root (forged, cross-domain, wrong effect, stale, or unknown signer); nonce stays uncertain",
+            )
+        digest = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode()).hexdigest()
+        return self._resolve(nonce, resolution, {"reconciled": True, "evidence_digest": digest})
 
     def _resolve(self, nonce: str, state: str, outcome: dict[str, Any]) -> NonceRecord:
         cur = self._conn.execute(

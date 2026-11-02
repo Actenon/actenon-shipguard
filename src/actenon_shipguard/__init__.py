@@ -8,27 +8,33 @@ agent), and the requester/agent (holds no signing key).
 """
 from __future__ import annotations
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 from .trust import (
     KeyPair, TrustRoots, TrustRoot, UntrustedKeyError,
-    ROLE_AUTHORITY, ROLE_CORRECTNESS, generate_trust_roots,
-    public_jwk, jwk_thumbprint, sha256_hex,
+    ROLE_AUTHORITY, ROLE_CORRECTNESS, ROLE_RECONCILIATION, generate_trust_roots,
+    public_jwk, jwk_thumbprint, sha256_hex, sign_domain, verify_domain,
+    DOMAIN_CORRECTNESS_CERT, DOMAIN_RECONCILIATION, DOMAIN_LEDGER,
 )
-from .nonce import NonceStore, ReplayRefused, RESERVED, COMMITTED, ROLLED_BACK
+from .nonce import (
+    NonceStore, ReplayRefused, ReconciliationVerifier, sign_reconciliation_statement,
+    RESERVED, COMMITTED, ROLLED_BACK,
+)
 from .receipts import verify_sentinel_receipt, ReceiptVerification
 from .certs import Certificate, build_certificate, verify_certificate, VERIFIED, NOT_VERIFIED
 from .proofs import AuthoritySigner, AuthorityVerifier, build_intent, mint_proof, verify_proof
-from .gate import EdgeGate, ProtectedResource, GateAuthorization, GateDecision, ALLOW, REFUSE
+from .gate import EdgeGate, ProtectedResource, GateDecision, ALLOW, REFUSE
 
 __all__ = [
     "__version__",
     "KeyPair", "TrustRoots", "TrustRoot", "UntrustedKeyError",
-    "ROLE_AUTHORITY", "ROLE_CORRECTNESS", "generate_trust_roots",
-    "public_jwk", "jwk_thumbprint", "sha256_hex",
-    "NonceStore", "ReplayRefused", "RESERVED", "COMMITTED", "ROLLED_BACK",
+    "ROLE_AUTHORITY", "ROLE_CORRECTNESS", "ROLE_RECONCILIATION", "generate_trust_roots",
+    "public_jwk", "jwk_thumbprint", "sha256_hex", "sign_domain", "verify_domain",
+    "DOMAIN_CORRECTNESS_CERT", "DOMAIN_RECONCILIATION", "DOMAIN_LEDGER",
+    "NonceStore", "ReplayRefused", "ReconciliationVerifier", "sign_reconciliation_statement",
+    "RESERVED", "COMMITTED", "ROLLED_BACK",
     "verify_sentinel_receipt", "ReceiptVerification",
     "Certificate", "build_certificate", "verify_certificate", "VERIFIED", "NOT_VERIFIED",
     "AuthoritySigner", "AuthorityVerifier", "build_intent", "mint_proof", "verify_proof",
-    "EdgeGate", "ProtectedResource", "GateAuthorization", "GateDecision", "ALLOW", "REFUSE",
+    "EdgeGate", "ProtectedResource", "GateDecision", "ALLOW", "REFUSE",
 ]

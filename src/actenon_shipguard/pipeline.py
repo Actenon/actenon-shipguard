@@ -21,14 +21,14 @@ from pathlib import Path
 from typing import Any
 
 from .certs import build_certificate
-from .gate import EdgeGate, GateAuthorization, ProtectedResource
+from .gate import EdgeGate, ProtectedResource
 from .nonce import NonceStore, ReplayRefused
 from .proofs import AuthoritySigner, build_intent, mint_proof
 from .receipts import verify_sentinel_receipt
 from .trust import generate_trust_roots, sha256_hex
 
 PKG = Path(__file__).resolve().parent
-FIXTURES = PKG.parent.parent / "fixtures"
+FIXTURES = PKG / "_bundled"
 PROPERTY_VERIFY = PKG / "property_verify.mjs"
 MODULE = "src/settle.ts"
 EXPORT = "allocate"
@@ -46,8 +46,13 @@ def _put_object(store: Path, payload: bytes) -> str:
 
 
 def build_offline_sentinel_store(store: Path, repo: Path, contract: dict, head: str,
-                                 *, status="VERIFIED", check_status="VERIFIED") -> str:
-    """Faithful content-addressed Sentinel store (object key == sha256 of stored bytes)."""
+                                 *, status="VERIFIED", check_status="VERIFIED", verifier_kp=None) -> str:
+    """Faithful content-addressed Sentinel store (object key == sha256 of stored bytes).
+
+    LABELLED OFFLINE FIXTURE: when ``verifier_kp`` is supplied the receipt carries a demo
+    verifier-authority attestation so the anti-fabrication path is exercised deterministically;
+    this is a verifier-format fixture, NOT a genuine Sentinel run (see RELEASE-EVIDENCE.md).
+    """
     store.mkdir(parents=True, exist_ok=True)
     src = (repo / MODULE).read_bytes()
     file_hash = _put_object(store, src)
@@ -59,8 +64,13 @@ def build_offline_sentinel_store(store: Path, repo: Path, contract: dict, head: 
                "objective": contract.get("objective", ""), "baselineHash": candidate_hash,
                "candidateHash": candidate_hash, "contractHash": contract_hash, "git": snapshot["git"],
                "runner": "local-advisory", "runtime": {"verifierVersion": "1.0.0", "workerSha256": "w" * 64, "node": "v22"},
-               "checks": [{"id": "req-1", "label": "behaviour", "status": check_status, "detail": "", "requirementId": "valid-ages"}],
+               "checks": [{"id": f"check-{r['id']}", "label": str(r.get("description", r["id"]))[:60],
+                           "status": check_status, "detail": "", "requirementId": r["id"]}
+                          for r in contract.get("requirements", [])],
                "changes": [], "status": status, "durationMs": 1, "limitations": [], "nextActions": []}
+    if verifier_kp is not None:
+        from .receipts import sign_receipt_attestation
+        receipt = sign_receipt_attestation(verifier_kp, receipt)
     rh = _put_object(store, json.dumps(receipt, sort_keys=True).encode())
     (store / "latest-verification.json").write_text(json.dumps({"schemaVersion": 1, "receipt": rh, "report": ""}))
     return rh
@@ -101,11 +111,12 @@ def _mint(tmp, roots, keypairs, contract, candidate, tsx, *, prover=None, status
     repo = _init_repo(tmp, candidate)
     head = _git_head(repo)
     store = tmp / f"store-{uuid.uuid4().hex[:6]}"
-    build_offline_sentinel_store(store, repo, contract, head, status=status, check_status=check_status)
+    build_offline_sentinel_store(store, repo, contract, head, status=status, check_status=check_status,
+                                 verifier_kp=keypairs["verifier"])
     contract_file = tmp / f"c-{uuid.uuid4().hex[:6]}.json"
     contract_file.write_text(json.dumps(contract, sort_keys=True))
     rv = verify_sentinel_receipt(store=store, approved_contract=contract_file, candidate_repo=repo,
-                                 module_path=MODULE, expected_head=head)
+                                 module_path=MODULE, expected_head=head, verifier_roots=roots)
     prop = run_property(tsx, code_for_exec or (repo / MODULE), FIXTURES / "contracts" / "property-contract.json", tmp, trials)
     cdig = sha256_hex(json.dumps(contract, sort_keys=True).encode())
     cert = build_certificate(prover=prover, code_path=repo / MODULE, module_path=MODULE, export=EXPORT,
@@ -124,9 +135,9 @@ def _mint(tmp, roots, keypairs, contract, candidate, tsx, *, prover=None, status
 
 def _gate(tmp, a, tsx, out_dir):
     nonces = NonceStore(tmp / f"nonces-{uuid.uuid4().hex[:6]}.db")
-    resource = ProtectedResource(trust_roots=a["roots"], authority_key_id=a["issuer"].key_id, tsx=tsx, out_dir=out_dir)
-    gate = EdgeGate(trust_roots=a["roots"], issuer_signer=a["issuer"], nonce_store=nonces,
-                    resource=resource, ledger=out_dir / "ledger.jsonl")
+    resource = ProtectedResource(trust_roots=a["roots"], tsx=tsx, out_dir=out_dir,
+                                 nonce_store=nonces, ledger=out_dir / "ledger.jsonl")
+    gate = EdgeGate(resource=resource)
     return gate, nonces, resource, out_dir
 
 
@@ -190,26 +201,33 @@ def run_demo(work_dir: Path, tsx: Path, *, trials: int = 200000) -> dict[str, An
     g6, *_ = _gate(tmp, a6, tsx, work / "out-rogue")
     record("6 certificate signed by untrusted prover key", _exec(g6, a6))
 
-    # 7. bypass: call the resource directly without a gate authorization
+    # 7. bypass: the enforcer holds NO signing key, and its only execute path re-verifies the
+    #    primary evidence — a tampered proof presented directly to the resource is refused.
+    import copy
     out7 = work / "out-bypass"
     _, _, r7, _ = _gate(tmp, aB, tsx, out7)
-    forged = GateAuthorization(nonce="x", code_artifact_sha256=aB["cert"].code_artifact_sha256, module_path=MODULE,
-                               export=EXPORT, parameters={"total_pence": 1000000, "parties": 3}, resource_id="ledger-1",
-                               expires_at="2099-01-01T00:00:00Z", signature="")
-    try:
-        r7.execute(forged, aB["code"]); bypass = "EXECUTED (FAIL)"
-    except PermissionError:
-        bypass = "REFUSED (no side effect)"
-    scenarios.append({"scenario": "7 direct resource call without gate authorization",
-                      "decision": "REFUSE", "layer": "ENFORCEMENT", "code": "NO_AUTHORIZATION", "reason": bypass})
-    print(f"  {'7 direct resource call without gate authorization':48s} -> {bypass}")
+    holds_key = r7.holds_signing_key()
+    tampered = copy.deepcopy(aB["pccb"])
+    tampered["action"]["parameters"]["total_pence"] = 999  # breaks the signed action_hash
+    d7 = r7.verify_and_execute(intent_payload=aB["intent"], pccb_payload=tampered, cert=aB["cert"],
+                               code_path=aB["code"], module_path=MODULE, export=EXPORT,
+                               parameters={"total_pence": 999, "parties": 3, "allocation_id": "alloc-1"},
+                               resource_id="ledger-1", now=aB["now"])
+    no_effect = not (out7 / "disbursement.json").exists()
+    bypass_ok = (d7.decision == "REFUSE") and no_effect and (not holds_key)
+    scenarios.append({"scenario": "7 enforcer is key-less; tampered proof refused at the only execute path",
+                      "decision": d7.decision if bypass_ok else "ALLOW", "layer": "ENFORCEMENT",
+                      "code": "KEYLESS_ENFORCER" if bypass_ok else "ENFORCER_HAS_KEY_OR_BYPASSED",
+                      "reason": f"holds_signing_key={holds_key}; decision={d7.decision}; side_effect_written={not no_effect}"})
+    print(f"  {'7 enforcer key-less + tampered proof refused':48s} -> {d7.decision} (holds_signing_key={holds_key})")
 
     summary = {
         "mode": "offline-deterministic",
         "generated_at": _now(),
         "authority_signer": {"algorithm": "Ed25519", "key_id": keypairs["authority"].key_id},
         "correctness_prover": {"algorithm": "Ed25519", "key_id": keypairs["correctness"].key_id},
-        "trust_roots_file": str(work / "trust" / "trust-roots.json"),
+        # Portable reference relative to the demo output dir — never an absolute local path in public evidence.
+        "trust_roots_file": "trust/trust-roots.json",
         "property_trials": trials,
         "scenarios": scenarios,
     }

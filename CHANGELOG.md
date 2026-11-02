@@ -2,6 +2,35 @@
 
 All notable changes to Actenon ShipGuard. This project adheres to semantic versioning.
 
+## [0.1.2] - 2026-11-01 — security remediation pre-release
+
+Scoped to the P0/P1 trust-boundary + packaging remediation. Does NOT add the real-agent product.
+See `SECURITY-REMEDIATION-v0.1.2.md` for the machine-readable matrix. Suite: 31 passed (macOS +
+Linux CI py3.11/3.12).
+
+### Security (P0)
+- **Authorisation binding** — executed parameters/resource/capability/export/module/contract-digest/
+  git-commit must exactly equal the verified intent; values derived from the intent; refused before
+  any side effect. Negative controls incl. small-auth-reused-for-larger-action.
+- **Signing-authority separation** — the enforcer holds ONLY pinned public trust roots and NO private
+  key (Option A): the protected boundary independently verifies the original PCCB + certificate +
+  exact code + nonce; no forgeable handoff capability. Authority identity resolved from authenticated
+  proof data. Versioned domain separation for cert/reconciliation/receipt-attestation signatures.
+- **Key storage** — private keys live OUTSIDE the project workspace; `init` refuses a workspace
+  `--keys-dir`; `--enforcement isolated` fails closed without external KMS/HSM/service custody.
+- **Sentinel receipt soundness** — full approved-requirement coverage with matching ids (rejects zero
+  checks / unrelated ids / partial coverage) PLUS an isolated verifier-authority attestation, so a
+  manually-VERIFIED and consistently re-hashed receipt is rejected.
+- **Packaging** — fixtures + JS verifier bundled into the wheel; non-editable install verified from an
+  unrelated cwd (doctor + demo PASS on bundled resources only).
+
+### Security (P1)
+- **Nonce reconciliation** — trusted internally-configured verifier over pinned reconciliation roots
+  and canonical versioned statements; no caller callback; fails closed (nonce stays uncertain).
+- **TOCTOU** — executes an immutable snapshot written from the exact hashed bytes.
+- **CI/Action** — action installs from `$GITHUB_ACTION_PATH` with an allowlisted command; CI builds +
+  clean-installs the wheel and fails if tsx is missing or any test skips.
+
 ## [0.1.1] - 2026-11-01 — pre-release
 
 ### Fixed

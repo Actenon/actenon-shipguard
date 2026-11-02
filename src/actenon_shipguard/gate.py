@@ -1,24 +1,27 @@
-"""The execution-edge gate and the protected resource it mediates (mandate 6A/6D/6E).
+"""The execution-edge enforcement boundary (v0.1.2 P0 signing-authority separation).
 
-Trust boundary: the protected resource NEVER executes on its own. It requires a
-``GateAuthorization`` capability signed by the authority issuer (a key the coding
-agent does not hold) and re-verifies the exact code-artifact digest before invoking
-the certified implementation. The disbursement is produced BY calling the certified
-``allocate()`` from the exact certified source — there is no synthetic record and no
-alternate dispatch path inside the protected boundary.
+OPTION A — smallest attack surface. The protected boundary independently verifies the ORIGINAL
+signed authority (Actenon PCCB) and correctness evidence before executing. The enforcer holds ONLY
+pinned PUBLIC trust roots: it possesses NO private signing key and therefore cannot mint proofs,
+certificates, dispatch capabilities, ledger signatures or reconciliation evidence. There is no
+forgeable handoff capability to leak — ``verify_and_execute`` is the ONLY route to the side effect
+and it re-verifies the primary evidence every call, so invoking it directly cannot bypass anything.
 
-Gate order (all must hold before any side effect):
-  1. Actenon authority proof verifies under a PINNED trust root
-  2. correctness certificate verifies under a PINNED trust root and is VERIFIED
-  3. proof-bound code/contract digests == certificate digests == sha256(actual bytes)
-  4. durable nonce RESERVED (replay + uncertain-outcome protection) before the effect
-  5. mediated invocation of the certified artifact
-  6. nonce COMMITTED only on a confirmed outcome; a crash leaves it RESERVED so a
-     blind retry is refused and the unresolved state is exposed
+Separate signing authorities (NONE held here):
+  * authority issuer        — signs Actenon PCCBs
+  * correctness prover       — signs correctness certificates (domain shipguard/correctness-cert/v1)
+  * reconciliation authority — signs reconciliation evidence (domain shipguard/reconciliation/v1),
+                               verified by NonceStore's internal trusted verifier, never created here
+The authority identity is resolved from the AUTHENTICATED proof data (``pccb.signature.key_id``) and
+pinned against the trust roots — not taken on caller assertion.
+
+The decision ledger is tamper-EVIDENT via a hash chain. Unforgeable audit signing would require a
+separate audit authority; that is documented as a limitation, not claimed here.
 """
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -26,11 +29,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from actenon_protocol import canonicalize_bytes
+
 from .certs import Certificate, verify_certificate
 from .nonce import NonceStore, ReplayRefused
-from .proofs import AuthoritySigner, AuthorityVerifier, verify_proof
-from .trust import TrustRoots, ROLE_AUTHORITY, b64u_decode, b64u_encode, sha256_hex
-from actenon_protocol import canonicalize_bytes
+from .proofs import verify_proof
+from .trust import TrustRoots, sha256_hex
 
 ALLOW = "ALLOW"
 REFUSE = "REFUSE"
@@ -56,41 +60,30 @@ class GateDecision:
         return f"{self.decision} [{self.layer}/{self.code}] {self.reason}"
 
 
-@dataclass
-class GateAuthorization:
-    """Signed capability the resource requires before it will execute. The agent
-    cannot forge it: it is signed by the authority issuer key."""
-    nonce: str
-    code_artifact_sha256: str
-    module_path: str
-    export: str
-    parameters: dict[str, Any]
-    resource_id: str
-    expires_at: str
-    signature: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return {k: getattr(self, k) for k in ("nonce", "code_artifact_sha256", "module_path", "export", "parameters", "resource_id", "expires_at", "signature")}
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "GateAuthorization":
-        return cls(**d)
-
-    def _signable(self) -> dict[str, Any]:
-        return {k: getattr(self, k) for k in ("nonce", "code_artifact_sha256", "module_path", "export", "parameters", "resource_id", "expires_at")}
-
-
 class ProtectedResource:
-    """The consequential action. Executes ONLY with a valid signed GateAuthorization,
-    re-verifies the code digest, and invokes the certified implementation for real."""
+    """The consequential action AND its enforcement boundary. Holds NO private key.
 
-    def __init__(self, *, trust_roots: TrustRoots, authority_key_id: str, tsx: Path, out_dir: Path):
-        self._verifier = AuthorityVerifier(trust_roots, authority_key_id)  # public-only: cannot sign
+    ``verify_and_execute`` is the only route to the side effect; it always verifies proof +
+    certificate + exact-code binding + nonce before executing an immutable snapshot of the
+    certified bytes. There is deliberately no execute-without-verify method.
+    """
+
+    def __init__(self, *, trust_roots: TrustRoots, tsx: Path, out_dir: Path,
+                 nonce_store: NonceStore, ledger: Path):
+        self._roots = trust_roots          # PUBLIC trust roots only — no signing material
         self._tsx = Path(tsx)
         self._out_dir = Path(out_dir)
+        self._nonces = nonce_store
+        self._ledger = Path(ledger)
+        self._ledger.parent.mkdir(parents=True, exist_ok=True)
 
-    def _invoke_certified(self, code_path: Path, export: str, args: list[Any]) -> Any:
-        """Mediated invocation: import the EXACT certified artifact and call the export."""
+    def holds_signing_key(self) -> bool:
+        """Self-audit: the enforcer must never possess private signing material."""
+        return any(hasattr(self, a) for a in ("_issuer", "_signer", "_priv", "_keypair", "_kp"))
+
+    # ---- immutable-snapshot invocation of the exact certified bytes ----
+    def _invoke_certified(self, code_bytes: bytes, export: str, args: list[Any]) -> Any:
+        snap_dir = Path(tempfile.mkdtemp(prefix="shipguard-snapshot-"))
         runner = tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False)
         runner.write(
             "import { pathToFileURL } from 'node:url';\n"
@@ -100,142 +93,142 @@ class ProtectedResource:
             "console.log(JSON.stringify(m[fn](...args)));\n"
         )
         runner.close()
+        snapshot = snap_dir / "certified.ts"
         try:
+            snapshot.write_bytes(code_bytes)   # exact bytes that were hashed
+            snapshot.chmod(0o444)              # immutable snapshot (same-user caveat documented)
+            if sha256_hex(snapshot.read_bytes()) != sha256_hex(code_bytes):
+                raise RuntimeError("snapshot digest does not match the certified bytes")
             proc = subprocess.run(
-                [str(self._tsx), runner.name, str(code_path), export, json.dumps(args)],
-                capture_output=True, text=True, timeout=30,
-            )
+                [str(self._tsx), runner.name, str(snapshot), export, json.dumps(args)],
+                capture_output=True, text=True, timeout=30)
+            if proc.returncode != 0:
+                raise RuntimeError(f"certified invocation failed: {proc.stderr.strip()[:300]}")
+            return json.loads(proc.stdout.strip().splitlines()[-1])
         finally:
             Path(runner.name).unlink(missing_ok=True)
-        if proc.returncode != 0:
-            raise RuntimeError(f"certified invocation failed: {proc.stderr.strip()[:300]}")
-        return json.loads(proc.stdout.strip().splitlines()[-1])
+            shutil.rmtree(snap_dir, ignore_errors=True)
 
-    def execute(self, auth: GateAuthorization, code_path: Path) -> dict[str, Any]:
-        # 1. Capability check: a valid issuer signature over the authorization.
-        if not auth.signature or not self._verifier.verify_raw(canonicalize_bytes(auth._signable()), auth.signature):
-            raise PermissionError("unauthorised: gate authorization signature invalid or missing")
-        # 2. Expiry.
-        if datetime.fromisoformat(auth.expires_at.replace("Z", "+00:00")) < datetime.now(timezone.utc):
-            raise PermissionError("unauthorised: gate authorization expired")
-        # 3. Re-verify the EXACT artifact that will execute (defence in depth at the edge).
-        actual = sha256_hex(Path(code_path).read_bytes())
-        if actual != auth.code_artifact_sha256:
-            raise PermissionError(f"unauthorised: code artifact {actual[:12]}… != authorised {auth.code_artifact_sha256[:12]}…")
-        # 4. Mediated invocation of the certified implementation — the real side effect.
-        total = auth.parameters["total_pence"]
-        parties = auth.parameters["parties"]
-        shares = self._invoke_certified(Path(code_path), auth.export, [total, parties])
-        # 5. Atomic write of the disbursement record produced BY the certified code.
-        self._out_dir.mkdir(parents=True, exist_ok=True)
-        record = {
-            "allocation_id": auth.parameters.get("allocation_id", "alloc"),
-            "total_pence": total, "parties": parties, "shares": shares,
-            "conserved": sum(shares) == total,
-            "executed_at": _utcnow_iso(),
-            "nonce": auth.nonce, "resource_id": auth.resource_id,
-            "code_artifact_sha256": actual,
-        }
-        tmp = self._out_dir / "disbursement.partial"
-        tmp.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        tmp.replace(self._out_dir / "disbursement.json")  # atomic
-        return record
-
-
-class EdgeGate:
-    def __init__(self, *, trust_roots: TrustRoots, issuer_signer: AuthoritySigner,
-                 nonce_store: NonceStore, resource: ProtectedResource, ledger: Path):
-        self._roots = trust_roots
-        self._issuer = issuer_signer
-        self._nonces = nonce_store
-        self._resource = resource
-        self._ledger = Path(ledger)
-        self._ledger.parent.mkdir(parents=True, exist_ok=True)
-
-    def _sign_auth(self, auth: GateAuthorization) -> GateAuthorization:
-        auth.signature = b64u_encode(self._issuer.sign_raw(canonicalize_bytes(auth._signable())))
-        return auth
-
-    def _record(self, decision: GateDecision) -> None:
-        line = {"ts": _utcnow_iso(), "decision": decision.decision, "layer": decision.layer,
-                "code": decision.code, "reason": decision.reason, "evidence": decision.evidence}
-        sig = b64u_encode(self._issuer.sign_raw(canonicalize_bytes(line)))
-        with self._ledger.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"record": line, "authority_signature": sig}, sort_keys=True) + "\n")
-
-    def authorize_and_execute(
-        self, *, intent_payload: dict[str, Any], pccb_payload: dict[str, Any],
-        cert: Certificate, code_path: Path, module_path: str, export: str,
-        parameters: dict[str, Any], resource_id: str, now: datetime | None = None,
-    ) -> GateDecision:
+    def verify_and_execute(self, *, intent_payload: dict[str, Any], pccb_payload: dict[str, Any],
+                           cert: Certificate, code_path: Path, module_path: str, export: str,
+                           parameters: dict[str, Any], resource_id: str,
+                           now: datetime | None = None) -> GateDecision:
         now = now or datetime.now(timezone.utc)
         constraints = intent_payload["action"]["constraints"]
 
-        # 1. AUTHORITY — Actenon proof under pinned trust root.
+        # 1. AUTHORITY — verify the PCCB; authority identity resolved from the proof + pinned roots.
         try:
-            verified = verify_proof(trust_roots=self._roots, key_id=self._issuer.key_id,
-                                    intent_payload=intent_payload, pccb_payload=pccb_payload,
-                                    now=now, request_id=f"req-{pccb_payload.get('nonce','x')}")
+            verified = verify_proof(trust_roots=self._roots, intent_payload=intent_payload,
+                                    pccb_payload=pccb_payload, now=now,
+                                    request_id=f"req-{pccb_payload.get('nonce', 'x')}")
         except Exception as e:
-            d = GateDecision(REFUSE, "AUTHORITY", "PROOF_INVALID", f"authority proof failed: {getattr(e,'refusal_code',e)}")
-            self._record(d); return d
+            return self._decide(REFUSE, "AUTHORITY", "PROOF_INVALID",
+                                f"authority proof failed: {getattr(e, 'refusal_code', e)}")
 
-        # 2. CORRECTNESS — certificate under pinned trust root.
+        # 2. INTENT EQUALITY — every executed value must equal the verified authorised intent.
+        vaction = verified.pccb.action
+        auth_params = dict(vaction.parameters)
+        auth_resource = verified.pccb.target.resource_id
+        mism = []
+        if parameters != auth_params:
+            mism.append(f"parameters {parameters} != authorised {auth_params}")
+        if resource_id != auth_resource:
+            mism.append(f"resource_id {resource_id!r} != authorised {auth_resource!r}")
+        if export != cert.body["code_artifact"]["export"]:
+            mism.append(f"export {export!r} != certified {cert.body['code_artifact']['export']!r}")
+        if module_path != cert.body["code_artifact"]["module"]:
+            mism.append(f"module {module_path!r} != certified {cert.body['code_artifact']['module']!r}")
+        if constraints.get("contract", "").replace("sha256:", "") != cert.body.get("contract_digest"):
+            mism.append("proof-bound contract digest != certificate contract digest")
+        if constraints.get("git_head") != cert.body.get("git_head"):
+            mism.append("proof-bound git commit != certificate git commit")
+        if mism:
+            return self._decide(REFUSE, "AUTHORITY", "INTENT_MISMATCH",
+                                "executed action does not equal the verified authorised intent: " + "; ".join(mism),
+                                {"authorised_capability": vaction.capability})
+
+        # 3. CORRECTNESS — certificate under the pinned correctness root (domain-separated).
         cv = verify_certificate(cert, self._roots)
         if not cv.ok:
-            d = GateDecision(REFUSE, "CORRECTNESS", "CERT_UNTRUSTED", "; ".join(cv.reasons))
-            self._record(d); return d
+            return self._decide(REFUSE, "CORRECTNESS", "CERT_UNTRUSTED", "; ".join(cv.reasons))
         if cert.overall != "VERIFIED":
             p, s = cert.body["property"], cert.body["sentinel"]
-            d = GateDecision(REFUSE, "CORRECTNESS", "NOT_VERIFIED",
-                             f"correctness {cert.overall} (property={p['verdict']}, sentinel_ok={s['ok']}, failed_checks={s['failed_checks'][:4]})")
-            self._record(d); return d
+            return self._decide(REFUSE, "CORRECTNESS", "NOT_VERIFIED",
+                                f"correctness {cert.overall} (property={p['verdict']}, sentinel_ok={s['ok']}, "
+                                f"failed_checks={s['failed_checks'][:4]})")
 
-        # 3. Exact-execution-identity binding: proof constraints == cert == actual bytes.
-        actual_hash = sha256_hex(Path(code_path).read_bytes())
+        # 4. EXACT-CODE BINDING — proof constraint == certificate == sha256(actual bytes).
+        code_bytes = Path(code_path).read_bytes()
+        actual_hash = sha256_hex(code_bytes)
         bound_code = constraints.get("code_artifact", "").replace("sha256:", "")
         if not (bound_code == cert.code_artifact_sha256 == actual_hash):
-            d = GateDecision(REFUSE, "CORRECTNESS", "CODE_ARTIFACT_MISMATCH",
-                             f"proof-bound {bound_code[:12]}… / cert {cert.code_artifact_sha256[:12]}… / actual {actual_hash[:12]}… disagree")
-            self._record(d); return d
+            return self._decide(REFUSE, "CORRECTNESS", "CODE_ARTIFACT_MISMATCH",
+                                f"proof-bound {bound_code[:12]}… / cert {cert.code_artifact_sha256[:12]}… / "
+                                f"actual {actual_hash[:12]}… disagree")
         if constraints.get("correctness_cert", "").replace("sha256:", "") != cert.digest:
-            d = GateDecision(REFUSE, "CORRECTNESS", "CERT_DIGEST_MISMATCH", "proof does not commit to this certificate")
-            self._record(d); return d
+            return self._decide(REFUSE, "CORRECTNESS", "CERT_DIGEST_MISMATCH",
+                                "proof does not commit to this certificate")
 
         nonce = pccb_payload.get("nonce")
-        effect_id = sha256_hex(canonicalize_bytes({"resource": resource_id, "params": parameters, "nonce": nonce}))
+        effect_id = sha256_hex(canonicalize_bytes(
+            {"resource": auth_resource, "params": auth_params, "nonce": nonce}))
 
-        # 4. Durable nonce reservation BEFORE the side effect.
+        # 5. NONCE — durable reservation BEFORE any side effect.
         try:
             self._nonces.reserve(nonce=nonce, pccb_id=pccb_payload.get("pccb_id", ""), effect_id=effect_id)
         except ReplayRefused as e:
-            d = GateDecision(REFUSE, "REPLAY", e.code, e.message, {"nonce_state": e.state})
-            self._record(d); return d
+            return self._decide(REFUSE, "REPLAY", e.code, e.message, {"nonce_state": e.state})
 
-        # 5. Mediated invocation of the certified artifact (the real consequential action).
-        auth = self._sign_auth(GateAuthorization(
-            nonce=nonce, code_artifact_sha256=actual_hash, module_path=module_path, export=export,
-            parameters=parameters, resource_id=resource_id,
-            expires_at=_plus_seconds(30), signature="",
-        ))
+        # 6. EXECUTE the immutable snapshot of the exact certified bytes (the real side effect).
         try:
-            record = self._resource.execute(auth, code_path)
+            shares = self._invoke_certified(code_bytes, export,
+                                            [auth_params["total_pence"], auth_params["parties"]])
         except Exception as e:
-            # Uncertain outcome: nonce stays RESERVED; blind retry will be refused.
-            d = GateDecision(REFUSE, "EXECUTION", "EFFECT_UNCERTAIN",
-                             f"side effect did not confirm ({e}); nonce left RESERVED — reconcile with evidence, do not blind-retry",
-                             {"nonce": nonce, "effect_id": effect_id})
-            self._record(d); return d
+            return self._decide(REFUSE, "EXECUTION", "EFFECT_UNCERTAIN",
+                                f"side effect did not confirm ({e}); nonce left RESERVED — reconcile with "
+                                f"signed evidence, do not blind-retry",
+                                {"nonce": nonce, "effect_id": effect_id})
+        self._out_dir.mkdir(parents=True, exist_ok=True)
+        record = {"allocation_id": auth_params.get("allocation_id", "alloc"),
+                  "total_pence": auth_params["total_pence"], "parties": auth_params["parties"],
+                  "shares": shares, "conserved": sum(shares) == auth_params["total_pence"],
+                  "executed_at": _utcnow_iso(), "nonce": nonce, "resource_id": auth_resource,
+                  "code_artifact_sha256": actual_hash}
+        tmp = self._out_dir / "disbursement.partial"
+        tmp.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(self._out_dir / "disbursement.json")
 
-        # 6. Confirmed outcome -> commit the nonce durably.
+        # 7. Confirmed outcome -> commit the nonce durably.
         self._nonces.commit(nonce=nonce, outcome={"disbursement": record, "effect_id": effect_id})
-        d = GateDecision(ALLOW, "OK", "AUTHORISED_AND_CORRECT",
-                         "authority proof + correctness cert + exact-code binding verified; certified code invoked; nonce committed",
-                         {"nonce": nonce, "code_artifact_sha256": actual_hash, "cert_digest": cert.digest,
-                          "shares": record.get("shares"), "conserved": record.get("conserved")})
-        self._record(d); return d
+        return self._decide(ALLOW, "OK", "AUTHORISED_AND_CORRECT",
+                            "authority proof + correctness cert + intent equality + exact-code binding verified; "
+                            "certified snapshot invoked; nonce committed",
+                            {"nonce": nonce, "code_artifact_sha256": actual_hash, "cert_digest": cert.digest,
+                             "shares": shares, "conserved": record["conserved"]})
+
+    # ---- tamper-evident hash-chained ledger (enforcer cannot sign; it has no key) ----
+    def _decide(self, decision, layer, code, reason, evidence=None) -> GateDecision:
+        d = GateDecision(decision, layer, code, reason, evidence or {})
+        self._append_ledger(d)
+        return d
+
+    def _append_ledger(self, d: GateDecision) -> None:
+        prev = "genesis"
+        if self._ledger.exists():
+            lines = [ln for ln in self._ledger.read_text().splitlines() if ln.strip()]
+            if lines:
+                prev = sha256_hex(lines[-1].encode())
+        entry = {"ts": _utcnow_iso(), "prev": prev, "decision": d.decision, "layer": d.layer,
+                 "code": d.code, "reason": d.reason, "evidence": d.evidence}
+        with self._ledger.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, sort_keys=True) + "\n")
 
 
-def _plus_seconds(n: int) -> str:
-    from datetime import timedelta
-    return (datetime.now(timezone.utc) + timedelta(seconds=n)).isoformat().replace("+00:00", "Z")
+class EdgeGate:
+    """Thin facade over the protected boundary. Holds NO signing key; delegates verification+execution."""
+
+    def __init__(self, *, resource: ProtectedResource):
+        self._resource = resource
+
+    def authorize_and_execute(self, **kwargs) -> GateDecision:
+        return self._resource.verify_and_execute(**kwargs)

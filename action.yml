@@ -28,23 +28,28 @@ runs:
     - uses: actions/setup-node@v4
       with:
         node-version: "20"
-    - name: Install ShipGuard (pinned)
+    - name: Install ShipGuard from the ACTION's own path (not the consumer cwd)
       shell: bash
       run: |
         python -m pip install --upgrade pip
-        pip install -e '.[dev]'
+        python -m pip install "$GITHUB_ACTION_PATH"
         npm install -g tsx
     - name: Diagnostics
       shell: bash
       run: actenon-shipguard doctor
-    - name: Run ShipGuard
+    - name: Run ShipGuard (allowlisted command; inputs via env, never shell-interpolated)
       shell: bash
+      env:
+        SG_COMMAND: ${{ inputs.command }}
+        SG_TRIALS: ${{ inputs.trials }}
       run: |
-        if [ "${{ inputs.command }}" = "demo" ]; then
-          actenon-shipguard demo --out shipguard-evidence --trials "${{ inputs.trials }}"
-        else
-          actenon-shipguard ${{ inputs.command }}
-        fi
+        case "$SG_COMMAND" in
+          demo)
+            case "$SG_TRIALS" in (''|*[!0-9]*) echo "trials must be a non-negative integer" >&2; exit 2;; esac
+            actenon-shipguard demo --out shipguard-evidence --trials "$SG_TRIALS" ;;
+          doctor) actenon-shipguard doctor ;;
+          *) echo "unsupported command: $SG_COMMAND (allowlist: demo|doctor)" >&2; exit 2 ;;
+        esac
     - name: Upload evidence
       if: always()
       uses: actions/upload-artifact@v4

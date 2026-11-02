@@ -1,6 +1,6 @@
 {
   "mode": "offline-deterministic",
-  "generated_at": "2026-11-01T21:50:12.098615Z",
+  "generated_at": "2026-11-02T07:55:20.927615Z",
   "authority_signer": {
     "algorithm": "Ed25519",
     "key_id": "shipguard-authority-v1"
@@ -9,7 +9,7 @@
     "algorithm": "Ed25519",
     "key_id": "shipguard-correctness-v1"
   },
-  "trust_roots_file": "/Users/ross/Documents/Qoder/2026-11-01/d649cff7/agent-lab/actenon-shipguard/evidence/shipguard-demo/trust/trust-roots.json",
+  "trust_roots_file": "trust/trust-roots.json",
   "property_trials": 200000,
   "scenarios": [
     {
@@ -17,7 +17,7 @@
       "decision": "ALLOW",
       "layer": "OK",
       "code": "AUTHORISED_AND_CORRECT",
-      "reason": "authority proof + correctness cert + exact-code binding verified; certified code invoked; nonce committed",
+      "reason": "authority proof + correctness cert + intent equality + exact-code binding verified; certified snapshot invoked; nonce committed",
       "shares": [
         333334,
         333333,
@@ -45,14 +45,14 @@
       "decision": "REFUSE",
       "layer": "REPLAY",
       "code": "NONCE_REUSED",
-      "reason": "nonce nonce-4378b12f already committed; refusing duplicate consequential effect"
+      "reason": "nonce nonce-81220d26 already committed; refusing duplicate consequential effect"
     },
     {
       "scenario": "5a crash mid-effect (nonce reserved, no record)",
       "decision": "REFUSE",
       "layer": "EXECUTION",
       "code": "EFFECT_UNCERTAIN",
-      "reason": "side effect did not confirm (simulated crash mid-effect); nonce left RESERVED \u2014 reconcile with evidence, do not blind-retry",
+      "reason": "side effect did not confirm (simulated crash mid-effect); nonce left RESERVED \u2014 reconcile with signed evidence, do not blind-retry",
       "nonce_state": "reserved",
       "disbursement_written": false
     },
@@ -61,7 +61,7 @@
       "decision": "REFUSE",
       "layer": "REPLAY",
       "code": "UNCERTAIN_OUTCOME",
-      "reason": "nonce nonce-bcdf788d is reserved with an unresolved outcome (prior attempt may have crashed mid-effect); refusing blind retry \u2014 reconcile with signed evidence first"
+      "reason": "nonce nonce-aec15206 is reserved with an unresolved outcome (prior attempt may have crashed mid-effect); refusing blind retry \u2014 reconcile with signed evidence first"
     },
     {
       "scenario": "6 certificate signed by untrusted prover key",
@@ -71,11 +71,11 @@
       "reason": "UNTRUSTED_PROVER: no active pinned correctness trust root for key_id='rogue-prover-v1'"
     },
     {
-      "scenario": "7 direct resource call without gate authorization",
+      "scenario": "7 enforcer is key-less; tampered proof refused at the only execute path",
       "decision": "REFUSE",
       "layer": "ENFORCEMENT",
-      "code": "NO_AUTHORIZATION",
-      "reason": "REFUSED (no side effect)"
+      "code": "KEYLESS_ENFORCER",
+      "reason": "holds_signing_key=False; decision=REFUSE; side_effect_written=False"
     }
   ]
 }

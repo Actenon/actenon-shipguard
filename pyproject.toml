@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "actenon-shipguard"
-version = "0.1.1"
+version = "0.1.2"
 description = "Your AI agent says it's done. ShipGuard checks before it ships — independent verification + protected consequential execution for AI coding agents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -45,6 +45,15 @@ Issues = "https://github.com/Actenon/actenon-shipguard/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+actenon_shipguard = [
+  "property_verify.mjs",
+  "_bundled/candidates/*.ts",
+  "_bundled/contracts/*.json",
+  "_bundled/target-settlement/package.json",
+  "_bundled/target-settlement/src/*.ts",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

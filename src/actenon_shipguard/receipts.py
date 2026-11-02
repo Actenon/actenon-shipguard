@@ -83,6 +83,20 @@ def _git_head(repo: Path) -> str | None:
         return None
 
 
+def sign_receipt_attestation(verifier_kp, receipt: dict[str, Any]) -> dict[str, Any]:
+    """Isolated verifier authority signs the receipt content (domain-separated).
+
+    Produced OUTSIDE the coding agent's authority by the independent verifier identity. Embedding
+    it means a receipt whose status was manually flipped to VERIFIED and consistently re-hashed
+    still fails: the attacker cannot forge this signature over the altered content.
+    """
+    from .trust import DOMAIN_RECEIPT_ATTESTATION, sign_domain
+    body = {k: v for k, v in receipt.items() if k != "verifier_attestation"}
+    sig = sign_domain(verifier_kp, DOMAIN_RECEIPT_ATTESTATION, body)
+    return {**receipt, "verifier_attestation": {
+        "key_id": verifier_kp.key_id, "signature": sig, "domain": DOMAIN_RECEIPT_ATTESTATION}}
+
+
 def verify_sentinel_receipt(
     *,
     store: Path,
@@ -91,6 +105,7 @@ def verify_sentinel_receipt(
     module_path: str,
     expected_head: str | None = None,
     receipt_hash: str | None = None,
+    verifier_roots: "TrustRoots | None" = None,
 ) -> ReceiptVerification:
     """Independently verify the structured Sentinel receipt for an exact artifact."""
     store = Path(store)
@@ -156,6 +171,27 @@ def verify_sentinel_receipt(
             except Exception as e:
                 res.reject(f"CONTRACT: unreadable contract ({e})")
 
+    # 5b. Requirement coverage: every approved requirement must be represented by a qualifying
+    #     check with a MATCHING requirement id. One unrelated VERIFIED check cannot satisfy a
+    #     multi-requirement contract; zero checks cannot qualify; substituted/duplicated ids rejected.
+    try:
+        approved_reqs = [r["id"] for r in json.loads(Path(approved_contract).read_text()).get("requirements", [])]
+    except Exception as e:
+        return res.reject(f"CONTRACT: unreadable approved contract ({e})")
+    all_checks = receipt.get("checks") or []
+    if not all_checks:
+        res.reject("COVERAGE: receipt has zero checks — cannot satisfy any approved requirement")
+    else:
+        check_req_ids = [c.get("requirementId") for c in all_checks if c.get("requirementId")]
+        unrelated = sorted({rid for rid in check_req_ids if rid not in approved_reqs})
+        if unrelated:
+            res.reject(f"COVERAGE: check requirement id(s) not in the approved contract: {unrelated[:6]}")
+        verified_covering = {c.get("requirementId") for c in all_checks
+                             if c.get("status") == VERIFIED and c.get("requirementId") in approved_reqs}
+        missing = [rid for rid in approved_reqs if rid not in verified_covering]
+        if missing:
+            res.reject(f"COVERAGE: approved requirement(s) with no VERIFIED matching check: {missing[:6]}")
+
     # 6. Source identity + freshness: the snapshot's recorded hash for the module must
     #    equal sha256 of the bytes that will ACTUALLY execute now.
     if not res.candidate_hash:
@@ -199,5 +235,27 @@ def verify_sentinel_receipt(
     # 8. Verifier identity must be present (so the result is attributable).
     if not res.verifier_version:
         res.reject("VERIFIER: receipt lacks runtime.verifierVersion (unattributable result)")
+
+    # 9. Anti-fabrication: when a verifier trust root is supplied, the receipt MUST carry a valid
+    #    domain-separated attestation from the pinned isolated verifier authority. A manually
+    #    VERIFIED + consistently re-hashed receipt cannot forge this signature, so it does not
+    #    qualify for trusted execution. Synthetic receipts without it are rejected on the real path.
+    if verifier_roots is not None:
+        from .trust import DOMAIN_RECEIPT_ATTESTATION, ROLE_VERIFIER, verify_domain
+        att = receipt.get("verifier_attestation")
+        if not att:
+            res.reject("FABRICATION: receipt carries no verifier-authority attestation "
+                       "(synthetic/untrusted; cannot authorise the real protected path)")
+        else:
+            try:
+                vroot = verifier_roots.resolve(ROLE_VERIFIER, att.get("key_id", ""))
+            except Exception as e:
+                vroot = None
+                res.reject(f"FABRICATION: attestation signer is not a pinned verifier authority ({e})")
+            if vroot is not None:
+                att_body = {k: v for k, v in receipt.items() if k != "verifier_attestation"}
+                if not verify_domain(vroot.public_key(), DOMAIN_RECEIPT_ATTESTATION, att_body, att.get("signature", "")):
+                    res.reject("FABRICATION: verifier attestation signature invalid — receipt altered "
+                               "after attestation or forged")
 
     return res
