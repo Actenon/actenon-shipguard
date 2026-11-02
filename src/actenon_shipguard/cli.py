@@ -382,8 +382,11 @@ def cmd_explain(args) -> int:
 
 
 def cmd_reproduce(args) -> int:
-    """Independently re-execute a finding's witness in a FRESH disposable clone."""
-    import subprocess as sp
+    """Independently re-execute a finding's witness in a FRESH disposable clone.
+
+    The re-execution runs the SAME reviewed predicate against the SAME module in a NEW clone
+    of the developer's repository — not a replay of the recorded output.
+    """
     ev = _load_evidence(args.evidence)
     f = next((x for x in ev.get("findings", []) if x.get("finding_id") == args.finding_id), None)
     if f is None:
@@ -394,24 +397,47 @@ def cmd_reproduce(args) -> int:
         print("ERROR: tsx not found (SHIPGUARD_TSX / --tsx).", file=sys.stderr)
         return 2
     repo = Path(args.repo).resolve() if args.repo else Path.cwd()
-    ev_dir = Path(args.evidence) if Path(args.evidence).exists() else Path(".shipguard-bde")
-    script = ev_dir / f"bde-repro-{f['finding_id']}.mjs"
-    if not script.exists():
-        print(f"ERROR: standalone reproduction script missing: {script}", file=sys.stderr)
+    ev_dir = Path(args.evidence) if (Path(args.evidence) / "bde-laws.json").exists() else Path(".shipguard-bde")
+    laws_doc = json.loads((ev_dir / "bde-laws.json").read_text())
+    law = next((l for l in laws_doc.get("laws", [])
+                if l.get("law_id") == (f.get("law") or {}).get("law_id")), None)
+    if law is None:
+        print("ERROR: the violated law record is missing from the evidence (bde-laws.json).", file=sys.stderr)
         return 2
+    from .bde.laws import BehaviouralLaw
+    from .bde.scheduler import run_lawpack
+    from .bde.strategies import execution_for
     from .orchestrator import clone_isolated
+    law_obj = BehaviouralLaw.from_dict(dict(law))
+    entry = execution_for(law_obj)
+    if entry is None:
+        print("ERROR: law is not executable as recorded.", file=sys.stderr)
+        return 2
+    pack = {"schema_version": 1, "module": laws_doc.get("module") or f.get("module"),
+            "git_revision": laws_doc.get("git_revision", ""), "laws": [entry]}
     work = ev_dir / "repro-tmp"
     clone = clone_isolated(repo, work)
-    # the standalone script resolves the module relative to its own location
-    dst = clone / "bde-repro.mjs"
-    dst.write_text(script.read_text())
-    p = sp.run([str(tsx), str(dst)], cwd=str(clone), capture_output=True, text=True, timeout=180)
-    print(p.stdout.strip())
-    if p.stderr.strip():
-        print(p.stderr.strip()[:400], file=sys.stderr)
-    verdict = "VIOLATION reproduced" if "VIOLATION" in p.stdout else "no violation reproduced — see output"
-    print(f"reproduction exit: {p.returncode} ({verdict})")
-    return 0 if "VIOLATION" in p.stdout else 1
+    rep = run_lawpack(pack, clone, Path(tsx), laws_meta={law_obj.law_id: law_obj}, mode="discover")
+    outcome = rep.outcomes_for(law_obj.law_id)
+    print(f"re-producing finding {args.finding_id} in a fresh clone ({clone.name})")
+    print(f"  law      : {(f.get('law') or {}).get('statement')}")
+    print(f"  recorded : {f.get('detail')}")
+    if outcome is None:
+        print(f"  re-run   : {rep.runner_error or 'no outcome'}")
+        return 2
+    print(f"  re-run   : {outcome.status} (trials={outcome.trials})")
+    if outcome.status == "FAIL" and outcome.finding:
+        fl = outcome.finding
+        print(f"  witness  : {fl.get('args')}")
+        print(f"  detail   : {fl.get('detail')}")
+        print("REPRODUCED: the violation occurs again under independent re-execution.")
+        return 0
+    if outcome.status == "PASS":
+        print("NOT REPRODUCED: the law holds in the current repository state (was it fixed since "
+              "the finding was recorded?).")
+        return 1
+    print(f"NOT REPRODUCED: environment outcome {outcome.status} — {outcome.detail}")
+    return 2
 
 
 def cmd_repair(args) -> int:

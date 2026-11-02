@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,8 +63,15 @@ class Finding:
     def from_execution(f: dict[str, Any], module: str, revision: str,
                        package: dict[str, Any], module_sha: str) -> "Finding":
         law = f.get("law") or {}
-        fid = f"bde-{uuid.uuid4().hex[:10]}"
         args = f.get("args") if isinstance(f.get("args"), list) else (f.get("original_args") or [])
+        # Deterministic identity: the same violated law CONTENT with the same witness is the
+        # same finding across runs (so `shipguard reproduce <id>` survives a re-discovery).
+        ident = hashlib.sha256(json.dumps(
+            {"statement": law.get("statement"), "predicate": law.get("predicate"),
+             "module": law.get("module"), "export": law.get("export"),
+             "args": args, "kind": f.get("kind")},
+            sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()[:10]
+        fid = f"bde-{ident}"
         dep = {"package": package.get("name"), "package_version": package.get("version"),
                "module": module, "module_sha256": module_sha, "git_revision": revision,
                "law_digest_source": (law.get("grounding") or {}).get("sha256")}
@@ -93,15 +99,16 @@ def reproduce_script(finding: Finding, module: str) -> str:
     """A standalone, dependency-light reproduction script for one finding.
 
     Runs the exact witness arguments against the target module and prints expected/observed.
-    Anyone with node+tsx can run it — no ShipGuard installation required.
+    Anyone with node+tsx can run it — no ShipGuard installation required. All interpolated
+    text is JSON-encoded so repository-derived content can never break out of the script.
     """
     args_json = json.dumps(finding.minimal_args, ensure_ascii=False)
     expected_json = json.dumps(finding.expected, ensure_ascii=False, default=str)
-    law_stmt = (finding.law.get("statement") or "").replace("`", "'").replace("${", "$ {")
+    law_stmt = json.dumps((finding.law.get("statement") or "")[:200], ensure_ascii=False)
+    law_line = json.dumps(_first_line_of(finding.law.get("statement")), ensure_ascii=False)
+    g = finding.law.get("grounding") or {}
+    grounding = json.dumps(f"{g.get('file')}:{g.get('line_start')}", ensure_ascii=False)
     return f"""// Actenon ShipGuard BDE — standalone reproduction of finding {finding.finding_id}
-// Law: {law_stmt}
-// Status: {finding.bde_status}
-// Grounding: {(finding.law.get('grounding') or {}).get('file')}:{(finding.law.get('grounding') or {}).get('line_start')}
 // Run from the repository root:  tsx <this-file>.mjs
 import {{ pathToFileURL }} from 'node:url';
 import {{ resolve }} from 'node:path';
@@ -116,12 +123,20 @@ try {{ outcome = {{ threw: false, returned: fn(...ARGS) }}; }}
 catch (e) {{ outcome = {{ threw: true, name: e?.constructor?.name, message: String(e?.message ?? e) }}; }}
 const show = (v) => {{ try {{ const s = JSON.stringify(v); return s === undefined ? String(v) : s; }} catch {{ return String(v); }} }};
 console.log('finding   : {finding.finding_id}');
-console.log('law       : {law_stmt[:160]}');
+console.log('law       : ' + {law_line});
+console.log('grounding : ' + {grounding});
 console.log('input     : ' + show(ARGS));
 console.log('expected  : ' + show(EXPECTED));
-console.log('observed  : ' + (outcome.threw ? `threw ${{outcome.name}}: ${{outcome.message}}` : show(outcome.returned)));
-console.log('verdict   : ' + (outcome.threw ? 'VIOLATION (documented call threw)' : 'see expected vs observed'));
+console.log('observed  : ' + (outcome.threw ? 'threw ' + outcome.name + ': ' + outcome.message : show(outcome.returned)));
+const violated = outcome.threw;
+console.log('verdict   : ' + (violated ? 'VIOLATION (the call threw)' : 'compare expected vs observed'));
+if (violated) process.exit(1);
 """
+
+
+def _first_line_of(s: str | None, n: int = 160) -> str:
+    s = (s or "").split("\n")[0]
+    return s if len(s) <= n else s[: n - 1] + "…"
 
 
 def write_evidence(out_dir: Path, result: "BDEResult") -> Path:   # noqa: F821

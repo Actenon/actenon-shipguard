@@ -53,6 +53,8 @@ actenon_shipguard = [
   "_bundled/contracts/*.json",
   "_bundled/target-settlement/package.json",
   "_bundled/target-settlement/src/*.ts",
+  "bde/runner.mjs",
+  "bde/laws-schema.json",
 ]
 
 [tool.pytest.ini_options]
