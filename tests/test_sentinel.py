@@ -190,7 +190,13 @@ def test_real_sentinel_verifies_correct_fix(tmp_path):
                             sentinel=SENTINEL, runner="local")
     assert v.ok and v.status == "VERIFIED", v.reasons
     assert all(s == "VERIFIED" for s in v.requirements.values())
-    assert v.bindings.get("verifierVersion") and len(v.bindings.get("git_head") or "") == 40
+    assert v.bindings.get("verifier_version") and len(v.bindings.get("git_head") or "") == 40
+    # Phase 1.2/1.4: the evidence is content-addressed and bound to the exact candidate bytes.
+    assert v.integrity.get("receipt_content_address_ok") is True
+    assert v.integrity.get("referenced_objects_ok") is True
+    assert v.integrity.get("fresh_receipt") is True
+    assert v.integrity["candidate_identity"]["files_mismatched"] == []
+    assert v.integrity["candidate_identity"]["files_hash_matched"], "candidate files must be hash-verified"
 
 
 @pytest.mark.sentinel_integration

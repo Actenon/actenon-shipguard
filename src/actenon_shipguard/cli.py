@@ -190,8 +190,8 @@ def _select_adapter(name: str):
     return OfflineAdapter()
 
 
-_EXIT_BY_STATUS = {"verified": 0, "contradicted": 1, "no_change": 1, "environment_failure": 2,
-                   "interrupted": 2, "unverified": 1}
+_EXIT_BY_STATUS = {"verified": 0, "contradicted": 1, "no_change": 1, "review_required": 1,
+                   "environment_failure": 2, "interrupted": 2, "unverified": 1}
 
 
 def cmd_run(args) -> int:

@@ -7,6 +7,13 @@ on:
   pull_request:
     branches: [main]
 
+# `shell: bash` makes every run step use `bash -eo pipefail`, so a failing command inside a pipe
+# (e.g. `pytest ... | tee`) propagates its non-zero status instead of being masked by tee's exit 0.
+# Mandatory test steps additionally set `set -euo pipefail` explicitly and assert on the exit code.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -26,35 +33,49 @@ jobs:
 
       - name: Install pinned dependencies + package
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install -e '.[dev]'
           npm install -g tsx
 
       - name: Diagnostics (fails if a mandatory prerequisite like tsx is missing)
-        run: actenon-shipguard doctor
+        run: |
+          set -euo pipefail
+          actenon-shipguard doctor
 
       - name: Assert tsx prerequisite resolvable (no silent all-skip)
         run: |
+          set -euo pipefail
           python -c "from actenon_shipguard.cli import _find_tsx; import sys; p=_find_tsx(None); print('tsx:', p); sys.exit(0 if p else 1)"
 
       - name: Core security tests (trust boundary + adapters + Sentinel acceptance logic)
         # The real-Sentinel-CLI integration tests run in the dedicated sentinel-integration job
         # (they need the pinned Sentinel build); they are deselected here so they cannot silently skip.
         run: |
-          pytest -q -rs -m "not sentinel_integration" | tee /tmp/pytest.txt
+          set -euo pipefail
+          set +e
+          pytest -q -rs -m "not sentinel_integration" 2>&1 | tee /tmp/pytest.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "pytest exit code: $code"
+          test "$code" -eq 0 || { echo "ERROR: pytest failed (exit $code)"; exit "$code"; }
           grep -qE "[1-9][0-9]* passed" /tmp/pytest.txt
           if grep -qE "skipped" /tmp/pytest.txt; then echo "ERROR: tests were skipped (missing prerequisite)"; exit 1; fi
 
       - name: Deterministic offline demo (reduced trials for CI)
-        run: actenon-shipguard demo --out /tmp/sg-demo --trials 20000
+        run: |
+          set -euo pipefail
+          actenon-shipguard demo --out /tmp/sg-demo --trials 20000
 
       - name: Confirm demo verdict
         run: |
+          set -euo pipefail
           test -f /tmp/sg-demo/demo-summary.json
           grep -q '"decision": "ALLOW"' /tmp/sg-demo/demo-summary.json
 
       - name: Build wheel + clean NON-EDITABLE install + demo from unrelated cwd
         run: |
+          set -euo pipefail
           python -m pip install --upgrade build
           python -m build --wheel
           python -m venv /tmp/wheelenv
@@ -66,8 +87,8 @@ jobs:
           echo "wheel non-editable install + demo from unrelated cwd: OK"
 
   sentinel-integration:
-    # Proves the REAL Sentinel verifier integration end-to-end: structured receipts, a contradicted
-    # wrong fix, and the full offline repair loop (contradiction -> counterexample -> re-verification).
+    # Proves the REAL Sentinel verifier integration end-to-end: structured receipts, evidence
+    # integrity, a contradicted wrong fix, and the full offline repair loop.
     runs-on: ubuntu-latest
     env:
       SENTINEL_COMMIT: becba502c8dbebdd5e52b8ca09122f86e4e37bb3
@@ -86,11 +107,13 @@ jobs:
 
       - name: Install shipguard
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install -e '.[dev]'
 
       - name: Provision pinned Sentinel verifier (build from the exact commit)
         run: |
+          set -euo pipefail
           git clone --quiet https://github.com/rossbuckley1990-hash/sentinel-verified.git /tmp/sentinel-verified
           cd /tmp/sentinel-verified
           git checkout --quiet "$SENTINEL_COMMIT"
@@ -100,10 +123,17 @@ jobs:
 
       - name: Assert Sentinel resolvable (no silent skip)
         run: |
+          set -euo pipefail
           python -c "from actenon_shipguard.sentinel import find_sentinel; import sys; p=find_sentinel(); print('sentinel:', p); sys.exit(0 if p else 1)"
 
       - name: Real Sentinel integration tests (must run, not skip)
         run: |
-          pytest -q -rs -m sentinel_integration | tee /tmp/it.txt
+          set -euo pipefail
+          set +e
+          pytest -q -rs -m sentinel_integration 2>&1 | tee /tmp/it.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "pytest exit code: $code"
+          test "$code" -eq 0 || { echo "ERROR: pytest failed (exit $code)"; exit "$code"; }
           grep -qE "[1-9][0-9]* passed" /tmp/it.txt
           if grep -qE "skipped" /tmp/it.txt; then echo "ERROR: integration tests skipped (sentinel missing)"; exit 1; fi

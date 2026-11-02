@@ -26,7 +26,8 @@ from pathlib import Path
 from typing import Any
 
 from .adapters.base import AgentResult
-from .sentinel import run_sentinel_verify, find_sentinel
+from .sentinel import (bind_committed_tree, find_sentinel, is_dependency_path, is_test_path,
+                       run_sentinel_verify)
 from .trust import sha256_hex
 
 FIXTURES = Path(__file__).resolve().parent / "_bundled"
@@ -59,6 +60,9 @@ class RunRecord:
     final_counterexample: dict[str, Any] | None = None
     ordinary_tests_green_on_defect: bool | None = None
     evidence_dir: str = ""
+    allowed_paths: list[str] = field(default_factory=list)
+    tree_binding: dict[str, Any] | None = None    # committed tree == verified candidate (Phase 1.4)
+    disclosure: dict[str, Any] | None = None      # portable verification disclosure (Phase 1.6)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -110,32 +114,76 @@ def run_ordinary_tests(repo: Path) -> dict[str, Any]:
 
 
 def run_sentinel_challenge(sentinel_cli, repo: Path, approved_contract: Path, store: Path,
-                           *, baseline: str = "HEAD", runner: str = "local",
-                           timeout: int = 300) -> dict[str, Any]:
-    """Independent acceptance via the REAL Sentinel verifier (mandate §THIRD).
+                           *, baseline: str = "HEAD", runner: str = "local", timeout: int = 300,
+                           attempt_id: str | None = None) -> dict[str, Any]:
+    """Independent acceptance via the REAL Sentinel verifier (mandate §THIRD, Phase 1).
 
-    Consumes the structured receipt (never a terminal string); the verdict is independently
-    re-derived in sentinel.evaluate_receipt and bound to the approved contract, candidate
-    snapshot, full git identity and toolchain. The contract + store live OUTSIDE the agent repo.
+    Consumes the structured receipt (never a terminal string) and enforces evidence integrity:
+    a fresh receipt for THIS attempt, content-addressed receipt + referenced objects, exact
+    candidate/contract identity, schema-correct statuses and authorised change scope. The contract
+    and the verifier store live OUTSIDE the agent repo.
     """
     v = run_sentinel_verify(repo=repo, contract_path=approved_contract, store=store,
                             baseline=baseline, sentinel=sentinel_cli, runner=runner,
-                            allow_local=(runner == "local"), timeout=timeout)
+                            allow_local=(runner == "local"), timeout=timeout, attempt_id=attempt_id)
     cx = None
     if v.counterexamples:
         c = v.counterexamples[0]
         cx = {"requirement_id": c.get("requirement_id"), "invariant": c.get("label"),
               "input": c.get("input"), "expected": c.get("expected"), "observed": c.get("observed"),
-              "detail": c.get("detail")}
+              "detail": c.get("detail"), "shrunk": c.get("shrunk")}
     return {"ok": v.ok, "verdict": v.status, "counterexample": cx, "requirements": v.requirements,
             "ordinary_tests": v.ordinary_tests, "receipt_hash": v.receipt_hash,
-            "report_path": v.report_path, "bindings": v.bindings, "reasons": v.reasons,
+            "report_basename": Path(v.report_path).name if v.report_path else "",
+            "bindings": v.bindings, "reasons": v.reasons, "integrity": v.integrity,
+            "changes": v.changes, "non_verified_checks": v.non_verified_checks,
+            "duplicate_check_ids": v.duplicate_check_ids, "exit_code": v.exit_code,
+            "attempt_id": v.attempt_id, "disclosure": v.disclosure,
             "all_counterexamples": v.counterexamples}
 
 
-def _commit_candidate(repo: Path, message: str) -> str:
-    """Commit the agent's working-tree change so the verified candidate has a full git identity."""
-    for args in (["add", "-A"], ["commit", "-qm", message]):
+def validate_change_scope(repo: Path, allowed_paths: list[str] | None) -> dict[str, Any]:
+    """Validate the ACTUAL diff against the approved change scope.
+
+    A prompt telling the agent not to touch tests is not a control. Out-of-scope files, test
+    modifications (possible weakening) and dependency changes all force human review.
+    """
+    from .adapters.base import git_diff
+    changed, _ = git_diff(repo)
+    allowed = list(allowed_paths or [])
+    in_scope: list[str] = []
+    out_of_scope: list[str] = []
+    test_changes: list[str] = []
+    dep_changes: list[str] = []
+    for p in changed:
+        if allowed and not any(p == a or p.startswith(a.rstrip("/") + "/") for a in allowed):
+            out_of_scope.append(p)
+        else:
+            in_scope.append(p)
+        if is_test_path(p):
+            test_changes.append(p)
+        if is_dependency_path(p):
+            dep_changes.append(p)
+    return {"changed": changed, "allowed_paths": allowed, "in_scope": in_scope,
+            "out_of_scope": out_of_scope, "test_changes": test_changes,
+            "dependency_changes": dep_changes,
+            "clean": not (out_of_scope or test_changes or dep_changes)}
+
+
+def is_detected_defect(tests_passed: bool | None, challenge: dict[str, Any]) -> bool:
+    """ASPIRIN is claimed ONLY for a genuine independent behavioural CONTRADICTION.
+
+    Environment failures, incomplete coverage, unknown statuses, unresolved reviews, no-change and
+    verified outcomes are never described as a detected defect.
+    """
+    return (tests_passed is True and challenge.get("verdict") == "CONTRADICTED"
+            and not challenge.get("ok"))
+
+
+def _commit_candidate(repo: Path, message: str, allowed_paths: list[str] | None) -> str:
+    """Commit ONLY the approved-scope paths — never a blind ``git add -A``."""
+    paths = list(allowed_paths) if allowed_paths else ["."]
+    for args in (["add", "--", *paths], ["commit", "-qm", message]):
         subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
     return git_head(repo)
 
@@ -179,10 +227,13 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
     # a verifier dir, never inside the candidate repo) and is not generated from the agent's output.
     approved_contract = Path(approved_contract or (FIXTURES / "contracts" / "settlement-contract.json"))
     contract_digest = sha256_hex(approved_contract.read_bytes())
+    contract_json = json.loads(approved_contract.read_text())
+    # The approved change scope comes from the contract, and is enforced against the real diff.
+    allowed_paths = list(contract_json.get("allowedPaths") or [target_file])
     sentinel_cli = sentinel_cli or find_sentinel()
     store = work / "verifier-store"          # held-out evidence store, OUTSIDE the agent repo
     rec = RunRecord(task=task, agent=adapter.name, mode=adapter.mode, contract_digest=contract_digest,
-                    evidence_dir=str(evidence_dir or work))
+                    evidence_dir=str(evidence_dir or work), allowed_paths=allowed_paths)
 
     def go(state: str, **detail):
         rec.states.append(state)
@@ -190,7 +241,8 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
 
     go("INTENT", task=task)
     go("APPROVED_CONTRACT", contract=str(approved_contract), digest=contract_digest,
-       verifier="sentinel", note="developer-approved Sentinel acceptance contract; held out from the agent")
+       verifier="sentinel", allowed_paths=allowed_paths,
+       note="developer-approved Sentinel acceptance contract; held out from the agent")
 
     usable, reason = adapter.available()
     if not usable:
@@ -232,34 +284,74 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
 
         # Integrity guard: the agent must not have tampered with the held-out acceptance contract.
         if sha256_hex(approved_contract.read_bytes()) != contract_digest:
-            go("TAMPER", note="approved contract digest changed during run — aborting; agent cannot redefine acceptance")
-            rec.final_status = "contradicted"
+            go("TAMPER", note="approved contract digest changed during run — aborting; the agent cannot redefine acceptance")
+            rec.final_status = "review_required"
+            _write(rec); return rec
+
+        # Phase 1.5 — validate the ACTUAL diff against the approved change scope. A prompt telling
+        # the agent not to touch tests is not a control; out-of-scope edits, test modifications and
+        # dependency changes force human review instead of automatic acceptance.
+        scope = validate_change_scope(repo, allowed_paths)
+        go("CHANGE_SCOPE", attempt=attempt, **scope)
+        if not scope["clean"]:
+            rec.attempts.append({"attempt": attempt, "agent": asdict(res), "scope": scope,
+                                 "status": "review_required"})
+            rec.final_status = "review_required"
+            go("REVERIFICATION", attempt=attempt, verdict="REVIEW REQUIRED", scope=scope,
+               note=("change touches tests, dependencies or unauthorised paths; accepting it "
+                     "automatically would let the agent redefine its own acceptance"))
             _write(rec); return rec
 
         tests = run_ordinary_tests(repo)
         go("ORDINARY_TESTS", attempt=attempt, **tests)
+        # Phase 1.2 — a unique verification identity per attempt, so no receipt can be inherited.
+        attempt_id = f"a{attempt}-{uuid.uuid4().hex[:8]}"
         challenge = run_sentinel_challenge(sentinel_cli, repo, approved_contract, store,
-                                           baseline=baseline, runner=runner)
+                                           baseline=baseline, runner=runner, attempt_id=attempt_id)
         verdict = challenge.get("verdict")
         cx = challenge.get("counterexample")
-        go("INDEPENDENT_CHALLENGE", attempt=attempt, verdict=verdict, ok=challenge.get("ok"),
-           requirements=challenge.get("requirements"), ordinary_tests=challenge.get("ordinary_tests"),
-           receipt_hash=challenge.get("receipt_hash"), counterexample=cx,
-           reasons=(challenge.get("reasons") or [])[:4])
-        rec.attempts.append({"attempt": attempt, "agent": asdict(res), "ordinary_tests": tests,
-                             "challenge": challenge, "git_head": git_head(repo)})
+        go("INDEPENDENT_CHALLENGE", attempt=attempt, attempt_id=attempt_id, verdict=verdict,
+           ok=challenge.get("ok"), requirements=challenge.get("requirements"),
+           ordinary_tests=challenge.get("ordinary_tests"), receipt_hash=challenge.get("receipt_hash"),
+           integrity=challenge.get("integrity"), counterexample=cx,
+           reasons=(challenge.get("reasons") or [])[:6])
+        rec.attempts.append({"attempt": attempt, "attempt_id": attempt_id, "agent": asdict(res),
+                             "ordinary_tests": tests, "scope": scope, "challenge": challenge,
+                             "git_head": git_head(repo)})
 
-        if attempt == 0 and tests.get("passed") and not challenge.get("ok"):
-            rec.ordinary_tests_green_on_defect = True  # the aspirin: green ordinary tests, real defect
+        # Phase 1.7 — ASPIRIN only for a genuine independent behavioural contradiction.
+        if attempt == 0 and is_detected_defect(tests.get("passed"), challenge):
+            rec.ordinary_tests_green_on_defect = True
 
         if challenge.get("ok"):
-            new_head = _commit_candidate(repo, f"verified repair (attempt {attempt}) [sentinel {challenge.get('receipt_hash','')[:12]}]")
+            new_head = _commit_candidate(
+                repo, f"verified change (attempt {attempt}) [sentinel {str(challenge.get('receipt_hash'))[:12]}]",
+                allowed_paths)
+            # Phase 1.4 — establish a CHECKABLE binding that the committed tree is byte-identical to
+            # the candidate Sentinel actually verified. A receipt recorded against an earlier HEAD
+            # does not, by itself, attest this commit.
+            binding = bind_committed_tree(store=store / f"attempt-{attempt_id}",
+                                          receipt_hash=challenge.get("receipt_hash"),
+                                          repo=repo, commit=new_head)
+            go("TREE_BINDING", attempt=attempt, git_head=new_head,
+               candidate_hash=binding.get("candidate_hash"), files_checked=binding.get("files_checked"),
+               files_matched=len(binding.get("files_matched") or []), mismatches=binding.get("mismatches"),
+               equivalent=binding.get("equivalent"), error=binding.get("error"))
+            if not binding.get("equivalent"):
+                rec.final_status = "review_required"
+                go("REVERIFICATION", attempt=attempt, verdict="REVIEW REQUIRED", tree_binding=binding,
+                   note="committed tree is not byte-identical to the verified candidate; refusing to claim verification")
+                _write(rec); return rec
             rec.git_head = new_head
-            go("REVERIFICATION", attempt=attempt, verdict="VERIFIED", receipt_hash=challenge.get("receipt_hash"),
-               bindings=challenge.get("bindings"),
-               note="independent Sentinel verification confirms the repair; ordinary tests also green")
+            rec.tree_binding = binding
+            rec.disclosure = challenge.get("disclosure")
+            go("REVERIFICATION", attempt=attempt, verdict="VERIFIED",
+               receipt_hash=challenge.get("receipt_hash"), bindings=challenge.get("bindings"),
+               note="independent Sentinel verification confirms the change; ordinary tests also green")
             go("ATTESTATION_READY", git_head=new_head, receipt_hash=challenge.get("receipt_hash"),
-               note="verified candidate committed with full git identity; ready for Workproof attestation")
+               candidate_hash=(challenge.get("bindings") or {}).get("candidate_hash"),
+               tree_equivalent=True,
+               note="committed tree proven byte-identical to the verified candidate snapshot")
             rec.final_status = "verified"
             rec.final_counterexample = None
             _write(rec); return rec
@@ -269,7 +361,24 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
             rec.final_status = "environment_failure"
             _write(rec); return rec
 
-        # contradicted: record the counterexample; loop will repair if attempts remain
+        if verdict == "REVIEW REQUIRED":
+            rec.final_status = "review_required"
+            rec.final_counterexample = cx
+            go("REVERIFICATION", attempt=attempt, verdict="REVIEW REQUIRED",
+               reasons=challenge.get("reasons"),
+               note="Sentinel requires human judgement; not auto-accepted and not a detected defect")
+            _write(rec); return rec
+
+        if verdict != "CONTRADICTED":
+            # UNVERIFIED, an unknown status, or an evidence-integrity failure: insufficient evidence.
+            # This is NOT a detected defect and must never be reported as one.
+            rec.final_status = "unverified"
+            rec.final_counterexample = cx
+            go("REVERIFICATION", attempt=attempt, verdict=verdict, reasons=challenge.get("reasons"),
+               note="evidence insufficient or an integrity check failed; not accepted, not a contradiction")
+            _write(rec); return rec
+
+        # CONTRADICTED: record the counterexample; the loop repairs if attempts remain.
         go("COUNTEREXAMPLE", attempt=attempt, counterexample=cx,
            all_counterexamples=challenge.get("all_counterexamples"),
            note="fed back to the agent for a genuine repair" if attempt < max_attempts else "attempts exhausted")

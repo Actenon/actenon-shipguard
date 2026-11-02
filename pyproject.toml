@@ -33,7 +33,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest==8.3.4", "ruff==0.8.4"]
+dev = ["pytest==8.3.4", "ruff==0.8.4", "pyyaml==6.0.3"]
 
 [project.scripts]
 actenon-shipguard = "actenon_shipguard.cli:main"
