@@ -1021,6 +1021,272 @@ def run(agent_timeout: int = 420, only: list[str] | None = None,
     return {"results": results, "summary": summarize(results)}
 
 
+REPORT = REPO_ROOT / "BENCHMARK-REPORT-v0.2.0.md"
+
+
+def report() -> str:
+    """Render BENCHMARK-REPORT-v0.2.0.md FROM the artifacts, so no number is hand-transcribed."""
+    manifest = json.loads(MANIFEST.read_text())
+    payload = json.loads(RESULTS.read_text())
+    results = payload["results"]
+    s = summarize(results)
+    ab = [r for r in results if r.get("arm") == "AB"]
+    c = [r for r in results if r.get("arm") == "C"]
+    sp = manifest["selection_process"]
+    tasks_by_id = {t["id"]: t for t in manifest["tasks"]}
+    L: list[str] = []
+    a = L.append
+
+    a("# Actenon ShipGuard v0.2.0 — real-world benchmark report")
+    a("")
+    a(f"Generated from `BENCHMARK-MANIFEST-v0.2.0.json` (sha256 `{manifest['manifest_sha256']}`) and "
+      f"`BENCHMARK-RESULTS-v0.2.0.json` by `benchmark/harness.py report`. Every number below is read "
+      f"from those artifacts; none is transcribed by hand.")
+    a("")
+    a(f"- Run window: {payload.get('started_at')} → {payload.get('finished_at')}")
+    a(f"- Harness: `{manifest['harness']['path']}` sha256 `{manifest['harness']['sha256']}` at git "
+      f"`{manifest['harness']['git_head']}` (dirty={manifest['harness']['git_dirty']})")
+    v = manifest["verifier"]
+    a(f"- Independent oracle: {v['name']} pinned at `{v['pinned_commit']}`, runner "
+      f"`{v['runner']}`, vitest {manifest['harness']['vitest_version']}")
+    ag = manifest["agent"]
+    a(f"- Agent: {ag['name']} (sandbox `{ag['sandbox']}`, auth {ag['auth']}; {ag['note']})")
+    a(f"- Python {manifest['harness']['python']}; dependencies supplied by "
+      f"`{manifest['harness']['node_modules_source']}` — no benchmark-time install")
+    a("")
+    a("## 1. Question asked")
+    a("")
+    a(sp["purpose"] if "purpose" in sp else manifest["purpose"])
+    a("")
+    a("This report answers a narrower, measurable version of that question: across a frozen corpus of "
+      "real historical defects in real permissively-licensed projects, how often did a live coding "
+      "agent produce a change that the project's own tests accepted while an independently "
+      "established requirement was still violated — and did ShipGuard's counterexample feedback "
+      "produce a genuine repair when that happened?")
+    a("")
+    a("## 2. Corpus")
+    a("")
+    a(f"{s['tasks_in_corpus']} tasks across {len(s['projects'])} projects: "
+      + ", ".join(f"`{p}`" for p in s["projects"]) + ".")
+    a("")
+    a("| task | project | licence | upstream fix | baseline | kind | criteria source |")
+    a("|---|---|---|---|---|---|---|")
+    for t in manifest["tasks"]:
+        proj = manifest["projects"][t["project"]]
+        a(f"| `{t['id']}` | {t['project']} | {proj['license']} | `{t['fix_commit']}` "
+          f"{t['fix_subject']} | `{t['fix_commit']}^` | {t['kind']} | {t['criteria_source']} |")
+    a("")
+    a("Every task's baseline is the parent of a real upstream fix commit, so the defect is the "
+      "project's own historical defect rather than one written for this benchmark. Acceptance "
+      "criteria are assertions from the project's own test suite at that fix commit, and every "
+      "expected value was measured by executing the real code at both revisions.")
+    a("")
+    a("### 2.1 Pre-freeze gate (measured before any agent ran)")
+    a("")
+    a("| task | baseline verdict | fix verdict | tests @baseline | tests @fix | tests @fix-src-only | valid |")
+    a("|---|---|---|---|---|---|---|")
+    for val in manifest["pre_freeze_validation"]:
+        a(f"| `{val['task']}` | {val['baseline']['verdict']} | {val['fix']['verdict']} | "
+          f"{val['baseline_ordinary_tests']['passed']} | {val['fix_ordinary_tests']['passed']} | "
+          f"{val['fix_src_only']['ordinary_tests'].get('passed')} | **{val['valid']}** |")
+    a("")
+    a("Condition 5 (`fix-src-only`) applies the upstream source change alone to the frozen baseline, "
+      "leaving the baseline's own test files untouched. It proves two things at once: the project's "
+      "suite cannot see the defect, and a correct repair does not turn that suite red — which is what "
+      "makes arm A's decision rule fair. Sentinel enforces the same property independently through "
+      "its mandatory `preserved-tests` check.")
+    a("")
+    a("### 2.2 What was excluded, and why")
+    a("")
+    a("The corpus is smaller than the 12-20 tasks originally requested. "
+      f"{sp['corpus_size_honesty']}")
+    a("")
+    a("Candidates rejected during selection, each with the measured reason:")
+    a("")
+    for name, reason in sp["excluded"].items():
+        a(f"- **{name}** — {reason}")
+    a("")
+    if sp.get("entities_tasks_dropped"):
+        a("Individual tasks dropped after the project was accepted:")
+        a("")
+        for name, reason in sp["entities_tasks_dropped"].items():
+            a(f"- **{name}** — {reason}")
+        a("")
+    if sp.get("tasks_dropped_by_the_gate"):
+        a("Tasks dropped by the pre-freeze gate:")
+        a("")
+        for name, reason in sp["tasks_dropped_by_the_gate"].items():
+            a(f"- **{name}** — {reason}")
+        a("")
+    a("Measured constraints that shaped the corpus:")
+    a("")
+    for con in sp["measured_corpus_constraints"]:
+        a(f"- {con}")
+    a("")
+    a(f"Disclosure: {sp['disclosed_extra_cases']}")
+    a("")
+    a("## 3. Arms")
+    a("")
+    for k, desc in manifest["arms"].items():
+        a(f"- **Arm {k}** — {desc}")
+    a("")
+    a(manifest["arm_pairing"])
+    a("")
+    a("## 4. Results")
+    a("")
+    a("### 4.1 Arms A/B — one shared agent session per task, two decision rules")
+    a("")
+    a("| task | agent outcome | files changed | diff lines | ordinary tests | independent verdict | "
+      "arm A decision | arm B decision | actually correct |")
+    a("|---|---|---|---|---|---|---|---|---|")
+    for r in ab:
+        ag_ = r.get("agent") or {}
+        iv = r.get("independent_verification") or {}
+        a(f"| `{r['task']}` | {ag_.get('outcome')} | {len(ag_.get('changed_files') or [])} | "
+          f"{r.get('diff_lines')} | {r.get('ordinary_tests', {}).get('passed')} | "
+          f"{iv.get('verdict')} | {r.get('arm_A_decision')} | {r.get('arm_B_decision')} | "
+          f"{r.get('ground_truth_correct')} |")
+    a("")
+    a("### 4.2 Arm C — ShipGuard bounded counterexample-driven repair")
+    a("")
+    a("| task | attempts | agent outcomes | ordinary tests | verdicts | final status | "
+      "repair attempts used | tree binding | agent s | verify s |")
+    a("|---|---|---|---|---|---|---|---|---|---|")
+    for r in c:
+        att = r.get("attempts") or []
+        fin = r.get("final") or {}
+        a(f"| `{r['task']}` | {len(att)} | "
+          + ", ".join(str((x.get('agent') or {}).get('outcome')) for x in att) + " | "
+          + ", ".join(str((x.get('ordinary_tests') or {}).get('passed')) for x in att
+                      if 'ordinary_tests' in x) + " | "
+          + ", ".join(str((x.get('verification') or {}).get('verdict')) for x in att
+                      if 'verification' in x) + f" | {fin.get('status')} | "
+          f"{fin.get('repair_attempts_used', '-')} | {fin.get('tree_binding_equivalent', '-')} | "
+          f"{r.get('agent_seconds')} | {r.get('verification_seconds')} |")
+    a("")
+    a("### 4.3 Aggregate")
+    a("")
+    a("```json")
+    a(json.dumps(s, indent=2, sort_keys=True))
+    a("```")
+    a("")
+
+    a("## 5. The aspirin instances")
+    a("")
+    aspirin = [r for r in ab if (r.get("ordinary_tests") or {}).get("passed") is True
+               and r.get("ground_truth_correct") is False]
+    if aspirin:
+        a("These are the cases the product exists for: the project's own test suite was GREEN, the "
+          "agent reported a completed change, and the independent oracle still contradicted it.")
+        a("")
+        for r in aspirin:
+            iv = r.get("independent_verification") or {}
+            cx = iv.get("counterexample")
+            a(f"- **`{r['task']}`** — arm A would have ACCEPTED this (ordinary tests "
+              f"{(r.get('ordinary_tests') or {}).get('passed')}); the oracle returned "
+              f"`{iv.get('verdict')}` with receipt `{iv.get('receipt_hash')}`.")
+            if cx:
+                a(f"  - counterexample: `{json.dumps(cx, ensure_ascii=False)[:400]}`")
+            a(f"  - requirements: {json.dumps(iv.get('requirements'), ensure_ascii=False)[:400]}")
+        a("")
+    else:
+        a("**No aspirin instance occurred in arms A/B.** Across the frozen corpus the agent never "
+          "produced a change that the project's own tests accepted while the independent oracle "
+          "contradicted it. That is a real result, not a missing one: it means the ordinary-test "
+          "signal was sufficient on these tasks, and it is reported without expanding the corpus to "
+          "manufacture a demonstration.")
+        a("")
+
+    a("## 6. Live repair evidence")
+    a("")
+    repaired = [r for r in c if (r.get("final") or {}).get("status") == "verified"
+                and (r.get("final") or {}).get("repair_attempts_used", 0) >= 1]
+    if repaired:
+        a("Counterexample feedback drove a genuine repair, independently re-verified, and the "
+          "committed tree was proven byte-identical to the verified candidate:")
+        a("")
+        for r in repaired:
+            fin = r.get("final") or {}
+            att = r.get("attempts") or []
+            a(f"- **`{r['task']}`** — {fin.get('repair_attempts_used')} repair attempt(s); final "
+              f"status `{fin.get('status')}`; tree binding equivalent="
+              f"{fin.get('tree_binding_equivalent')}; committed head "
+              f"`{next((x.get('committed_head') for x in att if x.get('committed_head')), '-')}`; "
+              f"receipt `{(r.get('independent_verification') or {}).get('receipt_hash')}`.")
+            for x in att:
+                cx = (x.get("verification") or {}).get("counterexample")
+                if cx:
+                    a(f"  - attempt {x.get('attempt')} counterexample fed back: "
+                      f"`{json.dumps(cx, ensure_ascii=False)[:400]}`")
+        a("")
+        a("This is a demonstration that the loop works on real repositories. It is NOT a "
+          "statistically established reliability improvement: see §8.")
+    else:
+        a("**No natural live-agent repair occurred.** Either the agent's first attempt was already "
+          "verified, or no contradiction arose to feed back. Per the mandate this is reported as the "
+          "outcome; the corpus was not expanded and no prewritten candidate was substituted to "
+          "produce a demonstration.")
+    a("")
+
+    a("## 7. What this benchmark does and does not establish")
+    a("")
+    a("Established by measurement:")
+    a("")
+    a(f"- A frozen corpus of {s['tasks_in_corpus']} real historical defects across "
+      f"{len(s['projects'])} independently maintained projects, each validated in both directions "
+      f"(baseline contradicted, upstream fix verified) before any agent ran.")
+    a(f"- On {s['arm_AB']['defects_invisible_to_ordinary_tests']} of {s['arm_AB']['sessions']} "
+      f"arms-A/B sessions the project's own tests were green while the independent oracle "
+      f"contradicted the agent's change.")
+    a(f"- Arm A (tests only) would have falsely accepted "
+      f"{s['arm_AB']['arm_A_false_accepts']} change(s); arm B (independent verification) falsely "
+      f"accepted {s['arm_AB']['arm_B_false_accepts']}.")
+    a(f"- Arm C reached `{ 'verified' }` on {s['arm_C']['verified']} of {s['arm_C']['sessions']} "
+      f"tasks, of which {s['arm_C']['verified_after_repair']} required at least one repair attempt.")
+    a("")
+    a("NOT established:")
+    a("")
+    a("- No statistical reliability claim. The corpus is small and was not sampled from a population "
+      "of real agent tasks; rates are descriptive counts, not estimates with confidence intervals.")
+    a("- No comparison against a second coding agent. Only Codex was authenticated; Claude Code's "
+      "OAuth token was expired, so live Claude execution was disabled rather than simulated.")
+    a("- No hostile-agent containment claim. The runner is `local-advisory` under the same OS "
+      "account, which Sentinel itself states is not a security boundary.")
+    a("- No claim about tasks whose correct fix changes an existing assertion. Sentinel's mandatory "
+      "`preserved-tests` check makes such changes unverifiable by construction, so that whole class "
+      "is out of scope — see §2.2.")
+    a("- No general correctness claim, and no stable v1.0.0.")
+    a("")
+    a("## 8. Reproduction")
+    a("")
+    a("```sh")
+    a("# 1. pinned independent oracle (no npm install of shipguard required)")
+    a("git clone https://github.com/rossbuckley1990-hash/sentinel-verified.git")
+    a("cd sentinel-verified && git checkout "
+      f"{manifest['verifier']['pinned_commit']} && npm ci && npm run build && cd ..")
+    a("")
+    a("# 2. ShipGuard's own suite (must be 0 skipped)")
+    a("pip install -e '.[dev]'")
+    a("SHIPGUARD_SENTINEL=$PWD/sentinel-verified/dist/cli.js pytest -q -rs")
+    a("")
+    a("# 3. re-validate and re-freeze the corpus, then run the arms")
+    a("export SHIPGUARD_SENTINEL=$PWD/sentinel-verified/dist/cli.js")
+    a("export SHIPGUARD_TSX=$PWD/sentinel-verified/node_modules/.bin/tsx")
+    a("python benchmark/harness.py validate")
+    a("python benchmark/harness.py freeze")
+    a("codex login status          # the benchmark refuses to run without a real authenticated agent")
+    a("python benchmark/harness.py run")
+    a("python benchmark/harness.py report")
+    a("```")
+    a("")
+    a("Agent runs are not bit-reproducible: a live model is queried once per session. Everything "
+      "else — corpus selection, contracts, validation, aggregation and this document — is "
+      "deterministic from the pinned commits.")
+    a("")
+    REPORT.write_text("\n".join(L) + "\n")
+    return REPORT.read_text()
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "validate"
     rest = [a for a in sys.argv[2:] if not a.startswith("-")]
@@ -1044,5 +1310,8 @@ if __name__ == "__main__":
         print(json.dumps(out["summary"], indent=2))
     elif cmd == "summarize":
         print(json.dumps(summarize(json.loads(RESULTS.read_text())["results"]), indent=2))
+    elif cmd == "report":
+        report()
+        print(f"wrote {REPORT.name}")
     else:
         raise SystemExit(f"unknown command {cmd!r}")
