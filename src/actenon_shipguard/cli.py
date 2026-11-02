@@ -20,8 +20,10 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .orchestrator import run_task
 from .pipeline import FIXTURES, run_demo
-from .report import write_demo_report
+from .report import write_demo_report, write_run_report
+from .sentinel import find_sentinel
 from .trust import ROLE_CORRECTNESS, TrustRoots, generate_trust_roots
 
 
@@ -161,19 +163,121 @@ def cmd_doctor(args) -> int:
     return 0 if all(checks) else 2
 
 
+def _find_node_modules(explicit: str | None) -> Path | None:
+    """Locate a node_modules providing vitest for the candidate repo's ordinary tests."""
+    if explicit:
+        p = Path(explicit).expanduser()
+        return p if p.exists() else None
+    env = os.environ.get("SHIPGUARD_NODE_MODULES")
+    if env and Path(env).exists():
+        return Path(env)
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        for cand in (parent / "sentinel-verified" / "node_modules", parent / "node_modules"):
+            if (cand / ".bin" / "vitest").exists():
+                return cand
+    return None
+
+
+def _select_adapter(name: str):
+    if name == "codex":
+        from .adapters.codex import CodexAdapter
+        return CodexAdapter()
+    if name == "claude":
+        from .adapters.claude import ClaudeAdapter
+        return ClaudeAdapter()
+    from .adapters.offline import OfflineAdapter
+    return OfflineAdapter()
+
+
+_EXIT_BY_STATUS = {"verified": 0, "contradicted": 1, "environment_failure": 2,
+                   "interrupted": 2, "unverified": 1}
+
+
 def cmd_run(args) -> int:
-    if args.agent in ("claude", "codex"):
-        print(
-            f"actenon-shipguard run --agent {args.agent}: the real coding-agent repair loop "
-            "(edit -> ordinary tests -> independent challenge -> counterexample -> repair -> reverify)\n"
-            "is NOT wired in this v0.1.0 pre-release. The trust boundary, offline demo and adversarial\n"
-            "suite are complete and tested; the live Claude/Codex adapter is an explicit release blocker.\n"
-            "Run `actenon-shipguard demo` for the deterministic protected-execution demonstration.",
-            file=sys.stderr,
-        )
+    task = (args.task or "").strip()
+    if not task:
+        print('ERROR: a task is required, e.g. actenon-shipguard run "Fix the payment allocation bug" --agent codex',
+              file=sys.stderr)
         return 2
-    # offline agent == the deterministic demo
-    return cmd_demo(args)
+
+    adapter = _select_adapter(args.agent)
+    sentinel_cli = find_sentinel(args.sentinel)
+    node_modules = _find_node_modules(args.node_modules)
+    live = adapter.mode == "live"
+    banner = f"[LIVE agent: {adapter.name}]" if live else "[OFFLINE deterministic — NOT a live model repair]"
+
+    print(f"actenon-shipguard run {banner}")
+    print(f"  task        : {task}")
+    print(f"  verifier    : sentinel={'ok' if sentinel_cli else 'MISSING'}  "
+          f"node_modules={'ok' if node_modules else 'MISSING (ordinary tests skipped)'}  runner={args.runner}")
+
+    # The real Sentinel verifier is mandatory for independent acceptance — never fall back to a
+    # synthetic receipt for a live/production run, and never fabricate verification.
+    if sentinel_cli is None:
+        print("ERROR: the real Sentinel verifier is required for independent acceptance and was not found.\n"
+              "       Set SHIPGUARD_SENTINEL=/path/to/sentinel/dist/cli.js (or put `sentinel` on PATH).",
+              file=sys.stderr)
+        return 2
+    if live:
+        ok, reason = adapter.available()
+        if not ok:
+            print(f"ERROR: agent '{args.agent}' is unavailable: {reason}", file=sys.stderr)
+            print("       ShipGuard never fabricates model activity. Authenticate the agent (e.g. `codex login`),\n"
+                  "       or use `--agent offline` for the labelled deterministic regression run.", file=sys.stderr)
+            return 2
+
+    out = Path(args.out)
+    work = out / "tmp"                      # disposable (gitignored): candidate repo + verifier store
+    rec = run_task(task=task, adapter=adapter, work=work, sentinel_cli=sentinel_cli,
+                   node_modules=node_modules, max_attempts=args.max_attempts,
+                   agent_timeout=args.agent_timeout, runner=args.runner, evidence_dir=out)
+
+    # Preserve the final structured Sentinel receipt as a durable, selected reproducibility artifact.
+    _preserve_sentinel_receipt(work / "verifier-store", out)
+    report = write_run_report(rec.to_dict(), out / "shipguard-run-report.html")
+
+    # Actionable terminal summary.
+    print(f"\n  result      : {rec.final_status.upper()}  (agent={rec.agent}, mode={rec.mode})")
+    print(f"  lifecycle   : {' -> '.join(rec.states)}")
+    if rec.ordinary_tests_green_on_defect:
+        print("  ASPIRIN     : ordinary tests were GREEN while independent Sentinel CONTRADICTED an approved requirement")
+    if rec.final_counterexample:
+        c = rec.final_counterexample
+        print(f"  counterex.  : {c.get('requirement_id')} allocate({c.get('input')}) "
+              f"expected {c.get('expected')} observed {c.get('observed')}")
+    last = (rec.attempts[-1].get("challenge") if rec.attempts else {}) or {}
+    if last.get("receipt_hash"):
+        print(f"  receipt     : {last.get('receipt_hash')}")
+    print(f"  evidence    : {out / 'run-record.json'}")
+    print(f"  report      : {report}")
+    if args.open:
+        _open(report)
+    code = _EXIT_BY_STATUS.get(rec.final_status, 1)
+    print(f"RUN RESULT: {rec.final_status.upper()} (exit {code})")
+    return code
+
+
+def _preserve_sentinel_receipt(store: Path, out: Path) -> None:
+    """Copy the latest structured Sentinel receipt into the durable evidence dir (portable paths)."""
+    try:
+        lv = store / "latest-verification.json"
+        if not lv.exists():
+            return
+        ptr = json.loads(lv.read_text())
+        rh = ptr.get("receipt")
+        obj = store / "objects" / rh
+        if rh and obj.exists():
+            (out / "sentinel").mkdir(parents=True, exist_ok=True)
+            (out / "sentinel" / f"receipt-{rh}.json").write_bytes(obj.read_bytes())
+            (out / "sentinel" / "latest-verification.json").write_text(
+                json.dumps({"schemaVersion": ptr.get("schemaVersion", 1), "receipt": rh,
+                            "report": f"receipt-{rh}.html"}, indent=2) + "\n")
+            rep = ptr.get("report")
+            if rep and Path(rep).exists():
+                (out / "sentinel" / f"receipt-{rh}.html").write_bytes(Path(rep).read_bytes())
+    except Exception:
+        pass
 
 
 def _open(path: Path) -> None:
@@ -204,10 +308,17 @@ def main(argv=None) -> int:
     p.add_argument("--cert", required=True); p.add_argument("--trust-roots", required=True); p.set_defaults(fn=cmd_verify)
     p = sub.add_parser("report", help="render the HTML evidence report"); p.add_argument("--out", required=True); p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_report)
     p = sub.add_parser("doctor", help="environment diagnostics"); p.set_defaults(fn=cmd_doctor)
-    p = sub.add_parser("run", help="real coding-agent repair loop"); p.add_argument("task", nargs="?", default="")
+    p = sub.add_parser("run", help="real coding-agent repair loop (independent Sentinel acceptance)")
+    p.add_argument("task", nargs="?", default="")
     p.add_argument("--agent", default="offline", choices=["claude", "codex", "offline"])
-    p.add_argument("--out", default=str(Path("evidence") / "shipguard-demo")); p.add_argument("--trials", type=int, default=200000)
-    p.add_argument("--tsx", default=None); p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_run)
+    p.add_argument("--out", default=str(Path("evidence") / "shipguard-run"))
+    p.add_argument("--max-attempts", type=int, default=2, help="bounded repair attempts (0 = no repair)")
+    p.add_argument("--agent-timeout", type=int, default=600, help="per-attempt agent timeout (seconds)")
+    p.add_argument("--runner", default="local", choices=["local", "docker"],
+                   help="Sentinel verification runner (local is advisory; docker isolates)")
+    p.add_argument("--sentinel", default=None, help="path to sentinel CLI (or set SHIPGUARD_SENTINEL)")
+    p.add_argument("--node-modules", default=None, help="node_modules providing vitest (or set SHIPGUARD_NODE_MODULES)")
+    p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_run)
 
     args = ap.parse_args(argv)
     return args.fn(args)

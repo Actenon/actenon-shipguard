@@ -26,10 +26,10 @@ from pathlib import Path
 from typing import Any
 
 from .adapters.base import AgentResult
+from .sentinel import run_sentinel_verify, find_sentinel
 from .trust import sha256_hex
 
 FIXTURES = Path(__file__).resolve().parent / "_bundled"
-PROPERTY_VERIFY = Path(__file__).resolve().parent / "property_verify.mjs"
 MODULE = "src/settle.ts"
 EXPORT = "allocate"
 
@@ -73,6 +73,10 @@ def setup_repo(work: Path, node_modules: Path) -> Path:
     shutil.copy(FIXTURES / "target-settlement" / "src" / "settle.test.ts", repo / "src" / "settle.test.ts")
     (repo / "package.json").write_text(json.dumps(
         {"name": "settlement", "private": True, "type": "module", "scripts": {"test": "vitest run"}}))
+    # node_modules must stay OUT of the git baseline: Sentinel snapshots tracked files and rejects
+    # an unsupported node_modules entry. It is present on disk (for vitest) but gitignored. The
+    # pattern has NO trailing slash so it also matches a node_modules *symlink* (not just a dir).
+    (repo / ".gitignore").write_text("node_modules\n")
     if node_modules and Path(node_modules).exists():
         (repo / "node_modules").symlink_to(Path(node_modules), target_is_directory=True)
     for args in (["init", "-q"], ["config", "user.email", "sg@shipguard.local"], ["config", "user.name", "shipguard"],
@@ -98,44 +102,76 @@ def run_ordinary_tests(repo: Path) -> dict[str, Any]:
     return {"ran": True, "passed": p.returncode == 0, "summary": line or f"exit {p.returncode}"}
 
 
-def run_challenge(tsx: Path, repo: Path, property_contract: Path, trials: int) -> dict[str, Any]:
-    contract = json.loads(Path(property_contract).read_text())
-    contract["trials"] = trials
-    cf = repo.parent / f"challenge-{uuid.uuid4().hex[:6]}.json"
-    cf.write_text(json.dumps(contract))
-    try:
-        p = subprocess.run([str(tsx), str(PROPERTY_VERIFY), "--module", str(repo / MODULE), "--contract", str(cf)],
-                           capture_output=True, text=True, timeout=180)
-        report = json.loads(p.stdout)
-    except Exception as e:
-        return {"verdict": "ENVIRONMENT_FAILURE", "error": str(e), "violations": [], "trials": 0}
-    finally:
-        cf.unlink(missing_ok=True)
-    counterexample = None
-    if report.get("violations"):
-        v = report["violations"][0]
-        counterexample = {"invariant": v.get("invariant"), "input": v.get("minimal_args"),
-                          "observed": v.get("minimal_result"), "detail": v.get("detail"),
-                          "failing_inputs": v.get("failing_inputs")}
-    return {"verdict": report.get("verdict"), "trials": report.get("trials"),
-            "violations": len(report.get("violations") or []), "counterexample": counterexample,
-            "invariants": report.get("invariants")}
+def run_sentinel_challenge(sentinel_cli, repo: Path, approved_contract: Path, store: Path,
+                           *, baseline: str = "HEAD", runner: str = "local",
+                           timeout: int = 300) -> dict[str, Any]:
+    """Independent acceptance via the REAL Sentinel verifier (mandate §THIRD).
+
+    Consumes the structured receipt (never a terminal string); the verdict is independently
+    re-derived in sentinel.evaluate_receipt and bound to the approved contract, candidate
+    snapshot, full git identity and toolchain. The contract + store live OUTSIDE the agent repo.
+    """
+    v = run_sentinel_verify(repo=repo, contract_path=approved_contract, store=store,
+                            baseline=baseline, sentinel=sentinel_cli, runner=runner,
+                            allow_local=(runner == "local"), timeout=timeout)
+    cx = None
+    if v.counterexamples:
+        c = v.counterexamples[0]
+        cx = {"requirement_id": c.get("requirement_id"), "invariant": c.get("label"),
+              "input": c.get("input"), "expected": c.get("expected"), "observed": c.get("observed"),
+              "detail": c.get("detail")}
+    return {"ok": v.ok, "verdict": v.status, "counterexample": cx, "requirements": v.requirements,
+            "ordinary_tests": v.ordinary_tests, "receipt_hash": v.receipt_hash,
+            "report_path": v.report_path, "bindings": v.bindings, "reasons": v.reasons,
+            "all_counterexamples": v.counterexamples}
+
+
+def _commit_candidate(repo: Path, message: str) -> str:
+    """Commit the agent's working-tree change so the verified candidate has a full git identity."""
+    for args in (["add", "-A"], ["commit", "-qm", message]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    return git_head(repo)
 
 
 def _feedback(cx: dict[str, Any]) -> str:
-    return (f"Independent property verifier found a defect your change did not fix.\n"
-            f"Invariant violated: {cx.get('invariant')}\n"
-            f"Smallest reproducing input: allocate({cx.get('input')}) returned {cx.get('observed')}\n"
+    return (f"Independent Sentinel verification CONTRADICTED an approved requirement your change did not satisfy.\n"
+            f"Requirement: {cx.get('requirement_id')} — {cx.get('invariant')}\n"
+            f"Reproducing input: allocate({cx.get('input')})\n"
+            f"Expected: {cx.get('expected')}\n"
+            f"Observed: {cx.get('observed')}\n"
             f"Why it is wrong: {cx.get('detail')}\n"
-            f"Failing inputs sampled: {cx.get('failing_inputs')}")
+            f"Fix the underlying defect for the whole requirement class; do not special-case this input.")
 
 
-def run_task(*, task: str, adapter, tsx: Path, node_modules: Path, work: Path,
-             property_contract: Path | None = None, max_attempts: int = 2,
-             agent_timeout: int = 240, trials: int = 200000, evidence_dir: Path | None = None) -> RunRecord:
+def _model_codebase(repo: Path, target_file: str, export: str) -> dict[str, Any]:
+    """Structural model of the candidate (real extraction, not a text-only placeholder).
+
+    FIFTH wires Apprentice here for a full incremental codebase model; until then this performs a
+    genuine structural scan of the target module (exported symbols) and reports apprentice status
+    honestly rather than claiming an integration that did not run.
+    """
+    src = (repo / target_file)
+    exports: list[str] = []
+    if src.exists():
+        import re
+        for m in re.finditer(r"export\s+(?:async\s+)?function\s+([A-Za-z0-9_]+)", src.read_text()):
+            exports.append(m.group(1))
+    return {"target": target_file, "export": export, "exported_symbols": exports,
+            "apprentice": "not-wired (structural scan only)",
+            "note": "structural model of the candidate module; Apprentice indexing is a FIFTH item"}
+
+
+def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_contract: Path | None = None,
+             node_modules: Path | None = None, max_attempts: int = 2, agent_timeout: int = 240,
+             baseline: str = "HEAD", runner: str = "local", evidence_dir: Path | None = None,
+             target_file: str = MODULE, export: str = EXPORT) -> RunRecord:
     work = Path(work); work.mkdir(parents=True, exist_ok=True)
-    property_contract = Path(property_contract or (FIXTURES / "contracts" / "property-contract.json"))
-    contract_digest = sha256_hex(property_contract.read_bytes())
+    # The approved Sentinel acceptance contract is HELD OUT from the agent (lives in the package /
+    # a verifier dir, never inside the candidate repo) and is not generated from the agent's output.
+    approved_contract = Path(approved_contract or (FIXTURES / "contracts" / "settlement-contract.json"))
+    contract_digest = sha256_hex(approved_contract.read_bytes())
+    sentinel_cli = sentinel_cli or find_sentinel()
+    store = work / "verifier-store"          # held-out evidence store, OUTSIDE the agent repo
     rec = RunRecord(task=task, agent=adapter.name, mode=adapter.mode, contract_digest=contract_digest,
                     evidence_dir=str(evidence_dir or work))
 
@@ -144,25 +180,30 @@ def run_task(*, task: str, adapter, tsx: Path, node_modules: Path, work: Path,
         rec.transitions.append(Transition(_now(), state, detail))
 
     go("INTENT", task=task)
-    go("APPROVED_CONTRACT", contract=str(property_contract), digest=contract_digest,
-       note="developer-approved property contract; not generated from the agent's own output")
-    go("CODEBASE_MODEL", note="structural model optional (apprentice); target=src/settle.ts export=allocate")
+    go("APPROVED_CONTRACT", contract=str(approved_contract), digest=contract_digest,
+       verifier="sentinel", note="developer-approved Sentinel acceptance contract; held out from the agent")
 
     usable, reason = adapter.available()
     if not usable:
         go("ENVIRONMENT_FAILURE", agent=adapter.name, reason=reason)
         rec.final_status = "environment_failure"
         _write(rec); return rec
+    if sentinel_cli is None:
+        go("ENVIRONMENT_FAILURE", reason="sentinel CLI not available — cannot independently verify")
+        rec.final_status = "environment_failure"
+        _write(rec); return rec
 
     repo = setup_repo(work, node_modules)
     rec.git_head = git_head(repo)
     go("BASELINE", repo=str(repo), git_head=rec.git_head, note="buggy floor-split baseline; weak ordinary tests")
+    go("CODEBASE_MODEL", **_model_codebase(repo, target_file, export))
 
     cx = None
     for attempt in range(max_attempts + 1):
         state = "AGENT_CHANGE" if attempt == 0 else "AGENT_REPAIR"
         res: AgentResult = adapter.propose(task=task, repo=repo, attempt=attempt,
-                                           feedback=(_feedback(cx) if cx else None), timeout=agent_timeout)
+                                           feedback=(_feedback(cx) if cx else None), timeout=agent_timeout,
+                                           target_file=target_file, export=export)
         go(state, attempt=attempt, agent=res.agent, mode=res.mode, outcome=res.outcome,
            changed_files=res.changed_files, statement=res.statement[:400], error=res.error,
            duration_s=res.duration_s)
@@ -177,32 +218,48 @@ def run_task(*, task: str, adapter, tsx: Path, node_modules: Path, work: Path,
                note="agent made no change; not verified")
             _write(rec); return rec
 
+        # Integrity guard: the agent must not have tampered with the held-out acceptance contract.
+        if sha256_hex(approved_contract.read_bytes()) != contract_digest:
+            go("TAMPER", note="approved contract digest changed during run — aborting; agent cannot redefine acceptance")
+            rec.final_status = "contradicted"
+            _write(rec); return rec
+
         tests = run_ordinary_tests(repo)
         go("ORDINARY_TESTS", attempt=attempt, **tests)
-        challenge = run_challenge(tsx, repo, property_contract, trials)
+        challenge = run_sentinel_challenge(sentinel_cli, repo, approved_contract, store,
+                                           baseline=baseline, runner=runner)
         verdict = challenge.get("verdict")
         cx = challenge.get("counterexample")
-        go("INDEPENDENT_CHALLENGE", attempt=attempt, verdict=verdict, trials=challenge.get("trials"),
-           violations=challenge.get("violations"), counterexample=cx)
+        go("INDEPENDENT_CHALLENGE", attempt=attempt, verdict=verdict, ok=challenge.get("ok"),
+           requirements=challenge.get("requirements"), ordinary_tests=challenge.get("ordinary_tests"),
+           receipt_hash=challenge.get("receipt_hash"), counterexample=cx,
+           reasons=(challenge.get("reasons") or [])[:4])
         rec.attempts.append({"attempt": attempt, "agent": asdict(res), "ordinary_tests": tests,
                              "challenge": challenge, "git_head": git_head(repo)})
 
-        if attempt == 0 and tests.get("passed") and verdict != "VERIFIED":
-            rec.ordinary_tests_green_on_defect = True  # the aspirin: green tests, real defect
+        if attempt == 0 and tests.get("passed") and not challenge.get("ok"):
+            rec.ordinary_tests_green_on_defect = True  # the aspirin: green ordinary tests, real defect
 
-        if verdict == "VERIFIED":
-            go("REVERIFICATION", attempt=attempt, verdict="VERIFIED",
-               note="independent property verifier confirms the repair; ordinary tests also green")
+        if challenge.get("ok"):
+            new_head = _commit_candidate(repo, f"verified repair (attempt {attempt}) [sentinel {challenge.get('receipt_hash','')[:12]}]")
+            rec.git_head = new_head
+            go("REVERIFICATION", attempt=attempt, verdict="VERIFIED", receipt_hash=challenge.get("receipt_hash"),
+               bindings=challenge.get("bindings"),
+               note="independent Sentinel verification confirms the repair; ordinary tests also green")
+            go("ATTESTATION_READY", git_head=new_head, receipt_hash=challenge.get("receipt_hash"),
+               note="verified candidate committed with full git identity; ready for Workproof attestation")
             rec.final_status = "verified"
             rec.final_counterexample = None
             _write(rec); return rec
 
         if verdict == "ENVIRONMENT_FAILURE":
+            go("ENVIRONMENT_FAILURE", attempt=attempt, reasons=challenge.get("reasons"))
             rec.final_status = "environment_failure"
             _write(rec); return rec
 
         # contradicted: record the counterexample; loop will repair if attempts remain
         go("COUNTEREXAMPLE", attempt=attempt, counterexample=cx,
+           all_counterexamples=challenge.get("all_counterexamples"),
            note="fed back to the agent for a genuine repair" if attempt < max_attempts else "attempts exhausted")
         rec.final_counterexample = cx
 
