@@ -1473,10 +1473,14 @@ def report(agent: str = "claude") -> str:
     a("")
     a("- No statistical reliability claim. The corpus is small and was not sampled from a population "
       "of real agent tasks; rates are descriptive counts, not estimates with confidence intervals.")
+    if ran.get("name") == "claude":
+        second_agent = ("Codex CLI was authenticated but its usage limit was exhausted until "
+                        "2026-11-08, so no cross-model comparison was possible; that state was "
+                        "recorded as provider `unavailable`, never as an agent failure.")
+    else:
+        second_agent = "Claude Code was not usable for this run."
     a(f"- No comparison against a second coding agent. This run used **{ran.get('name')}** only. "
-      f"{('Codex CLI was authenticated but its usage limit was exhausted until 2026-11-08, so no '
-         'cross-model comparison was possible; that state was recorded as provider `unavailable`, '
-         'never as an agent failure.') if ran.get('name') == 'claude' else 'Claude Code was not usable for this run.'} "
+      f"{second_agent} "
       "A single model on a small corpus cannot support any claim about coding agents in general.")
     a("- No hostile-agent containment claim. The runner is `local-advisory` under the same OS "
       "account, which Sentinel itself states is not a security boundary.")

@@ -5,7 +5,7 @@ independently verifies it against a held-out approved contract, and (on contradi
 reproducible counterexample back to drive a genuine repair.**
 
 **Release decision: NO-GO for publishing v0.2.0 as the "developer aspirin" milestone.** The branch is
-retained, fully tested (128 passing, 0 skipped), and documented. Two mandatory gate conditions are not
+retained, fully tested (135 passing, 0 skipped), and documented. Two mandatory gate conditions are not
 satisfied, and the independent real-world benchmark now shows *why* they cannot be satisfied honestly on
 this corpus: across 6 frozen real historical defects in 3 independently maintained projects, the live
 agent (Claude Code) produced **correct code on all 6, first attempt**. Independent verification agreed
@@ -29,7 +29,8 @@ the full developer-aspirin release.
 | | |
 |---|---|
 | Tag | `v0.2.0-preview.1` → `89ae549e574765301f7919e701aa5eaacd3a1924` (branch `v0.2.0`) |
-| Distribution version | `0.2.0rc1` — "preview" is not a valid PEP 440 pre-release spelling, so the tag keeps the authorised name and the artifacts carry `0.2.0rc1`. pip flags it as a pre-release, so a plain `pip install actenon-shipguard` will not select it |
+| Distribution version | `0.2.0rc1` — "preview" is not a valid PEP 440 pre-release spelling, so the tag keeps the authorised name and the artifacts carry `0.2.0rc1`. `rc1` is a valid PEP 440 pre-release, so *if* this is ever published to an index a plain `pip install` would not select it without `--pre` |
+| Index publication | **None.** The package is not on PyPI and not on npm (both returned HTTP 404 when checked on 2026-11-02), so `pip install actenon-shipguard` finds no version at all. Install from the release asset: `pip install ./actenon_shipguard-0.2.0rc1-py3-none-any.whl`. Index distribution remains an explicit release blocker |
 | Release | <https://github.com/Actenon/actenon-shipguard/releases/tag/v0.2.0-preview.1> (marked pre-release, not a draft) |
 | Wheel | `actenon_shipguard-0.2.0rc1-py3-none-any.whl` — sha256 `5a81481042e88fb7fd8927e90f6a898139419bfc225f74230bea5cfb13d3b5fe` |
 | Sdist | `actenon_shipguard-0.2.0rc1.tar.gz` — sha256 `f415417eaf66913508f347577f1573a3e3874da050b005ab0f553863f2b15084` |
@@ -116,7 +117,7 @@ expired and live Claude was honestly disabled; that state was re-tested rather t
 
 ---
 
-## Test suite (128 passing, 0 skipped = 120 core + 8 Sentinel integration)
+## Test suite (135 passing, 0 skipped = 127 core + 8 Sentinel integration)
 
 | file | tests | what it locks in |
 |---|---|---|
@@ -124,18 +125,19 @@ expired and live Claude was honestly disabled; that state was re-tested rather t
 | `tests/test_evidence_integrity.py` | 55 | Phase 1: receipt freshness, content-addressing, candidate identity, scope, tree binding, CI negative controls |
 | `tests/test_sentinel.py` | 15 | acceptance logic against the real Sentinel schema + real-CLI integration |
 | `tests/test_real_repo_mode.py` | 10 | Phase 2: safe mode on a real repository; the original tree is provably untouched; the clone commits without depending on the host's git identity |
-| `tests/test_benchmark_corpus.py` | 9 | Phase 3: the frozen manifest is untampered, schema-legal, and its omissions are auditable |
+| `tests/test_benchmark_corpus.py` | 14 | Phase 3: the frozen manifest is untampered, schema-legal, and its omissions are auditable |
 | `tests/test_adapters.py` | 8 | adapter confinement, and provider exhaustion ≠ repair failure |
+| `tests/test_py311_syntax.py` | 2 | every source file is syntactically valid on Python 3.11, the declared minimum — with a negative control proving the guard can fail |
 
 **How this maps to CI, and why the numbers differ between jobs.** CI splits the suite by the
 `sentinel_integration` marker, so neither job runs all 128:
 
 | CI job | selection | result |
 |---|---|---|
-| `verify (3.11)`, `verify (3.12)` | `-m "not sentinel_integration"` | **120 passed, 8 deselected** |
+| `verify (3.11)`, `verify (3.12)` | `-m "not sentinel_integration"` | **127 passed, 8 deselected** |
 | `sentinel-integration` (node 22, clones + builds the pinned Sentinel) | `-m sentinel_integration` | **8 passed, 120 deselected** |
 
-120 + 8 = 128, with **0 skipped** in every job. "Deselected" is not "skipped": a deselected test is
+127 + 8 = 135, with **0 skipped** in every job. "Deselected" is not "skipped": a deselected test is
 excluded by marker before collection, whereas a skip would mean a test was collected and then did not
 run — which is what the anti-silent-skip guard fails the build for. Earlier revisions of this document
 quoted 127 (before the git-identity regression test was added) and did not show the per-job split; both
@@ -157,7 +159,7 @@ export SHIPGUARD_SENTINEL=/tmp/sentinel-verified/dist/cli.js
 export SHIPGUARD_NODE_MODULES=/tmp/sentinel-verified/node_modules
 export SHIPGUARD_TSX=/tmp/sentinel-verified/node_modules/.bin/tsx
 
-pytest -q                                   # 128 passed, 0 skipped
+pytest -q                                   # 135 passed, 0 skipped
 pytest -q -m "not sentinel_integration"     # 119 passed, 8 deselected (CI core job)
 pytest -q -m sentinel_integration           # 8 passed (real pinned Sentinel CLI)
 pytest -q tests/test_trust_boundary.py      # 31 passed — the v0.1.2 controls, unchanged
@@ -413,7 +415,7 @@ requirement is violated" can occur. That is a genuine scope limit, not a tuning 
 | 5 | Repaired candidate independently rechecked | **MET** — real Sentinel re-verification; and on all 6 arm-C runs the committed tree was proven byte-identical to the verified candidate (`tree_binding.equivalent` 6/6) |
 | 6 | Unsafe agent execution permissions removed | **MET** — `--dangerously-skip-permissions` gone; supported sandbox/permission controls; tested (`tests/test_adapters.py`, 8 tests) |
 | 7 | Apprentice/Howdex/Workproof real **or** explicitly excluded | **MET (excluded)** — see FIFTH |
-| 8 | Historical v0.1.2 security controls still pass | **MET** — `tests/test_trust_boundary.py` still exactly 31 tests, unchanged, passing within the 128 |
+| 8 | Historical v0.1.2 security controls still pass | **MET** — `tests/test_trust_boundary.py` still exactly 31 tests, unchanged, passing within the 135 |
 | 9 | Clean installation reproduces the supported workflow | **MET** — wheel → fresh venv → doctor/demo/run from unrelated cwd |
 | 10 | CI passes against the exact release commit | **MET** on `59ab439` — run [41460094532](https://github.com/Actenon/actenon-shipguard/actions/runs/41460094532): `verify (3.11)` 120 passed / 8 deselected, `verify (3.12)` 120 passed / 8 deselected, `sentinel-integration` 8 passed / 120 deselected, **0 skipped** in every job, with the pipefail + `${PIPESTATUS[0]}` control in force. An earlier claim of MET on `6d3a6b4`/`e238281` is **withdrawn as a false green** — see below |
 | 11 | Every limitation honestly documented | **MET** — this document plus `BENCHMARK-REPORT-v0.2.0.md` §7 and the manifest's measured exclusion reasons |
@@ -438,7 +440,7 @@ I will not fabricate, sandbag, or rig a live-agent defect to force them, and I w
 six successful verifications as a reliability improvement.
 
 A **scoped pre-release of Claim 1 only** was technically eligible: every other condition is met, the
-suite is 128 passing / 0 skipped, and the artifacts are independently checkable. It was withheld until
+suite is 135 passing / 0 skipped, and the artifacts are independently checkable. It was withheld until
 authorised. **On 2026-11-02 the repository owner authorised exactly that scoped preview** — see
 "v0.2.0-preview.1" below. Claim 2 remains unauthorised and unreleased.
 
