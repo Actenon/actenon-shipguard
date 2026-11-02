@@ -142,3 +142,82 @@ def test_arms_are_defined_and_the_a_b_pairing_is_disclosed():
     assert set(m["arms"]) == {"A", "B", "C"}
     assert "one shared agent session" in m["arm_pairing"].lower(), \
         "arms A and B are paired on one session; that must be stated, not implied"
+
+
+# --------------------------------------------------------------------------- #
+# The separate Codex run: gated by date, isolated artifacts, drift-proof corpus
+# --------------------------------------------------------------------------- #
+def _harness():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "sg_bench_harness", ROOT / "benchmark" / "harness.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_codex_run_cannot_overwrite_the_completed_claude_results():
+    H = _harness()
+    assert H.RUNS["claude"]["results"] != H.RUNS["codex"]["results"]
+    assert H.RUNS["claude"]["report"] != H.RUNS["codex"]["report"]
+    assert H.RUNS["codex"]["results"].name.endswith("-codex.json")
+    # the completed Claude run is identified as such inside its own artifact
+    recorded = json.loads(H.RUNS["claude"]["results"].read_text())
+    assert (recorded.get("agent") or {}).get("name") == "claude"
+
+
+def test_the_codex_run_is_gated_to_its_authorised_date():
+    from datetime import date
+    H = _harness()
+    assert H.RUNS["codex"]["not_before"] == "2026-11-09", \
+        "the Codex benchmark was authorised for no earlier than 2026-11-09"
+    assert H.RUNS["claude"]["not_before"] is None      # already executed
+    if date.today().isoformat() < H.RUNS["codex"]["not_before"]:
+        with pytest.raises(SystemExit, match="no earlier than"):
+            H.run(agent="codex")
+
+
+def test_corpus_integrity_detects_a_prompt_edited_after_the_freeze():
+    H = _harness()
+    manifest = json.loads(MANIFEST.read_text())
+    assert H.corpus_integrity(manifest)["ok"] is True, "the live corpus drifted from the freeze"
+
+    task = next(t for t in H.TASKS if t["id"] == "scule-splitbycase-numbers")
+    original = task["prompt"]
+    try:
+        task["prompt"] = original + " Also special-case the digit 3."
+        drifted = H.corpus_integrity(manifest)
+        assert drifted["ok"] is False
+        assert any("prompt differs" in d for d in drifted["drift"]), drifted["drift"]
+    finally:
+        task["prompt"] = original
+    assert H.corpus_integrity(manifest)["ok"] is True
+
+
+def test_corpus_integrity_detects_a_changed_expected_value():
+    H = _harness()
+    manifest = json.loads(MANIFEST.read_text())
+    task = next(t for t in H.TASKS if t["id"] == "entities-legacy-attribute-interrupted")
+    req = task["requirements"][0]
+    original = req["cases"][0]["expected"]
+    try:
+        req["cases"][0]["expected"] = "something-else"
+        drifted = H.corpus_integrity(manifest)
+        assert drifted["ok"] is False
+        assert any("contract differs" in d for d in drifted["drift"]), drifted["drift"]
+    finally:
+        req["cases"][0]["expected"] = original
+    assert H.corpus_integrity(manifest)["ok"] is True
+
+
+def test_a_dropped_task_is_detected_as_corpus_drift():
+    H = _harness()
+    manifest = json.loads(MANIFEST.read_text())
+    held = H.TASKS.pop()
+    try:
+        drifted = H.corpus_integrity(manifest)
+        assert drifted["ok"] is False
+        assert any("missing from the corpus" in d for d in drifted["drift"]), drifted["drift"]
+    finally:
+        H.TASKS.append(held)
+    assert H.corpus_integrity(manifest)["ok"] is True

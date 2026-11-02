@@ -19,6 +19,66 @@ external verifier, enforces change scope from the real diff, and commits a candi
 provably byte-identical to what was verified — 6/6, with every change confined to its allowed file. That
 is a **verification** result, not a detection or repair result. See "The two claims, separated".
 
+---
+
+## PUBLISHED: `v0.2.0-preview.1` (verification-only developer preview)
+
+Authorised by the repository owner on 2026-11-02 as a **scoped developer preview**, explicitly *not*
+the full developer-aspirin release.
+
+| | |
+|---|---|
+| Tag | `v0.2.0-preview.1` → `89ae549e574765301f7919e701aa5eaacd3a1924` (branch `v0.2.0`) |
+| Distribution version | `0.2.0rc1` — "preview" is not a valid PEP 440 pre-release spelling, so the tag keeps the authorised name and the artifacts carry `0.2.0rc1`. pip flags it as a pre-release, so a plain `pip install actenon-shipguard` will not select it |
+| Release | <https://github.com/Actenon/actenon-shipguard/releases/tag/v0.2.0-preview.1> (marked pre-release, not a draft) |
+| Wheel | `actenon_shipguard-0.2.0rc1-py3-none-any.whl` — sha256 `5a81481042e88fb7fd8927e90f6a898139419bfc225f74230bea5cfb13d3b5fe` |
+| Sdist | `actenon_shipguard-0.2.0rc1.tar.gz` — sha256 `f415417eaf66913508f347577f1573a3e3874da050b005ab0f553863f2b15084` |
+| Asset integrity | both assets were downloaded back from the release and re-hashed: identical to the local build from the clean tree at `89ae549`, byte for byte |
+| CI at this commit | run [41466184892](https://github.com/Actenon/actenon-shipguard/actions/runs/41466184892) — `verify (3.11)` 120 passed / 8 deselected, `verify (3.12)` 120 passed / 8 deselected, `sentinel-integration` 8 passed / 120 deselected; **128 total, 0 skipped**; demo PASS (1 ALLOW / 7 REFUSE); wheel non-editable install + demo from an unrelated cwd OK |
+
+**Claims carried by the release,** and the negatives it states in the same breath: the release body
+lists the five supported capabilities (live-agent integration, independent acceptance verification,
+approved change-scope enforcement, candidate-to-commit identity checking, evidence reporting within the
+tested scope) and then the five things it does **not** claim (demonstrated detection of live-agent
+defects, successful live counterexample-driven repair, general correctness, measured reliability
+improvement, production-grade hostile-agent containment). The null benchmark result is the headline
+section, not a footnote.
+
+**The false-accept distinction is stated explicitly in the release,** because it is the easiest thing
+to misread: 0 false accepts were measured on **correct** candidates, which is evidence that
+verification does not cry wolf. It is *not* a measured ability to detect **incorrect** candidates —
+the live agent never produced one, so detection rate was never exercised and is **unknown**, neither
+zero nor high.
+
+**The portable-evidence limitation is stated explicitly in the release:** the committed run records
+deliberately omit the original raw Sentinel receipts, because those receipts are content-addressed and
+embed absolute machine-local paths (`git.root`, scratch execution directories). Shipping them would
+leak local filesystem layout and would not verify on another machine. The portable records carry
+receipt hashes, verdicts, requirement outcomes, counterexamples and integrity results — enough to audit
+the logic, not enough to re-verify cryptographically offline. Validating the receipts themselves
+requires the documented reproduction workflow (`BENCHMARK-REPORT-v0.2.0.md` §8).
+
+**Additional clean-install validation performed for this release** (beyond CI): the wheel *and* the
+sdist were each installed non-editably into a fresh venv and exercised from an unrelated working
+directory — `--version` reports `0.2.0rc1`, `doctor` reports every pinned dependency `ok`, `demo`
+returns PASS with `decision: ALLOW`, and `run --agent offline` reaches `VERIFIED` with real Sentinel
+and tree binding `True`. Evidence from those clean runs contains **no** machine-local absolute path.
+
+**Release-history integrity.** No existing tag was moved: `v0.1.0` → `03c4b73`, `v0.1.1` → `96e62ea`,
+`v0.1.2` → `f32d1be`, all unchanged and all still published as pre-releases. PR #1 was reconciled
+**first**, as instructed: a verification record was posted on the PR before merging, and it was merged
+with a **merge commit** (`edeb32e`) rather than squashed or rebased, so `f32d1be` and the `v0.1.2`
+tag↔commit correspondence survive intact. `main` is now green (run 41464567752) and matches the
+published v0.1.2. Note that `main` still carries the pre-hardening `ci.yml` from `f32d1be`; the
+pipefail control and the `sentinel-integration` job arrive on `main` only when the v0.2.0 work is
+merged, which is **not** authorised by this preview.
+
+**Still excluded from this release:** Howdex (memory transfer), Workproof (attestation verification),
+Apprentice (codebase modelling) and npm distribution. The defect-detection and automatic-repair
+benefit remains **not established**; see the Codex benchmark plan below.
+
+---
+
 This supersedes nothing: v0.1.2 (the security-remediation pre-release) remains published and its
 controls still pass. v0.1.1 evidence is preserved in [`RELEASE-EVIDENCE.md`](RELEASE-EVIDENCE.md).
 

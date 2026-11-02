@@ -12,9 +12,13 @@ Design rules enforced here (mandate Phase 3/4):
     contract for ALL arms, so an initially correct solution is never counted as a failure.
 
 Usage:
-    python benchmark/harness.py validate    # check every contract: baseline CONTRADICTED, fix VERIFIED
-    python benchmark/harness.py freeze      # write BENCHMARK-MANIFEST-v0.2.0.json
-    python benchmark/harness.py run         # execute the three arms, write BENCHMARK-RESULTS-v0.2.0.json
+    python benchmark/harness.py validate             # 5 measured conditions per task, both directions
+    python benchmark/harness.py freeze               # write the manifest (refuses if any task is invalid)
+    python benchmark/harness.py integrity            # prove the live corpus still matches the freeze
+    python benchmark/harness.py run --agent claude   # -> BENCHMARK-RESULTS-v0.2.0.json
+    python benchmark/harness.py run --agent codex    # separate run, gated to 2026-11-09 -> ...-codex.json
+    python benchmark/harness.py report claude        # per-run report from that run's artifacts
+    python benchmark/harness.py compare              # cross-run comparison, with the confounds stated
 """
 from __future__ import annotations
 
@@ -63,6 +67,65 @@ CACHE = Path(os.environ.get("SHIPGUARD_BENCH_CACHE", "/tmp/sg-bench-cache"))
 NODE_MODULES = Path(os.environ.get("SHIPGUARD_NODE_MODULES") or _default_node_modules())
 MANIFEST = REPO_ROOT / "BENCHMARK-MANIFEST-v0.2.0.json"
 RESULTS = REPO_ROOT / "BENCHMARK-RESULTS-v0.2.0.json"
+
+# Each agent gets its OWN identified artifact set. The completed Claude run is immutable: a later
+# Codex run must never overwrite it or be written into it, so the two can be compared honestly.
+RUNS = {
+    "claude": {
+        "results": RESULTS,
+        "report": REPO_ROOT / "BENCHMARK-REPORT-v0.2.0.md",
+        "not_before": None,
+        "executed": "2026-11-02",
+    },
+    "codex": {
+        "results": REPO_ROOT / "BENCHMARK-RESULTS-v0.2.0-codex.json",
+        "report": REPO_ROOT / "BENCHMARK-REPORT-v0.2.0-codex.md",
+        # Authorised 2026-11-02 to run "no earlier than 9 November 2026", when the provider's usage
+        # limit resets. Enforced in code, not by convention, so the run cannot be started early.
+        "not_before": "2026-11-09",
+        "executed": None,
+    },
+}
+COMPARISON = REPO_ROOT / "BENCHMARK-COMPARISON-v0.2.0.md"
+
+
+def corpus_integrity(manifest: dict) -> dict:
+    """Prove the corpus a run is about to use is the one that was frozen.
+
+    Recomputes the manifest hash and a per-task contract hash from the live TASKS/PROJECTS tables and
+    compares them with the frozen values. Any drift — an edited prompt, a changed expected value, a
+    different revision — makes the run refuse to start, which is what stops a corpus being adjusted
+    after a result has been seen.
+    """
+    live = {k: v for k, v in manifest.items() if k != "manifest_sha256"}
+    recomputed = hashlib.sha256(
+        json.dumps(live, indent=2, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    frozen_tasks = {t["id"]: t for t in manifest["tasks"]}
+    contracts: dict[str, str] = {}
+    drift: list[str] = []
+    for t in TASKS:
+        blob = json.dumps(contract_for(t), ensure_ascii=False, sort_keys=True)
+        contracts[t["id"]] = hashlib.sha256(blob.encode()).hexdigest()
+        f = frozen_tasks.get(t["id"])
+        if f is None:
+            drift.append(f"{t['id']}: not in the frozen manifest")
+            continue
+        fblob = json.dumps(manifest["contracts"][t["id"]], ensure_ascii=False, sort_keys=True)
+        if hashlib.sha256(fblob.encode()).hexdigest() != contracts[t["id"]]:
+            drift.append(f"{t['id']}: contract differs from the frozen one")
+        for field in ("prompt", "fix_commit", "project", "kind", "criteria_source"):
+            if t.get(field) != f.get(field):
+                drift.append(f"{t['id']}: {field} differs from the frozen manifest")
+    for tid in frozen_tasks:
+        if tid not in {t["id"] for t in TASKS}:
+            drift.append(f"{tid}: in the frozen manifest but missing from the corpus")
+    return {"manifest_sha256_frozen": manifest.get("manifest_sha256"),
+            "manifest_sha256_recomputed": recomputed,
+            "manifest_unchanged": recomputed == manifest.get("manifest_sha256"),
+            "task_count": len(TASKS),
+            "contract_sha256": contracts,
+            "drift": drift,
+            "ok": not drift and recomputed == manifest.get("manifest_sha256")}
 
 PROJECTS = {
     "scule": {
@@ -983,11 +1046,35 @@ def summarize(results: list[dict]) -> dict:
 
 
 def run(agent_timeout: int = 420, only: list[str] | None = None,
-        arms: tuple[str, ...] = ("AB", "C"), agent: str = "codex") -> dict:
-    """Execute the frozen corpus. Writes RESULTS incrementally so a crash loses nothing."""
+        arms: tuple[str, ...] = ("AB", "C"), agent: str = "") -> dict:
+    """Execute the frozen corpus. Writes the run's own RESULTS incrementally so a crash loses nothing."""
     if not MANIFEST.exists():
         raise SystemExit("manifest not frozen — run `freeze` first")
     manifest = json.loads(MANIFEST.read_text())
+    if agent not in RUNS:
+        raise SystemExit(f"unknown run {agent!r} (use one of {sorted(RUNS)})")
+    cfg = RUNS[agent]
+    results_path: Path = cfg["results"]
+
+    # Date gate: enforced in code so an authorised-but-not-yet-due run cannot be started early.
+    if cfg["not_before"]:
+        today = datetime.now(timezone.utc).date().isoformat()
+        if today < cfg["not_before"]:
+            raise SystemExit(
+                f"REFUSING TO RUN: the {agent} benchmark is authorised no earlier than "
+                f"{cfg['not_before']} and today is {today}. The frozen corpus is unchanged and "
+                "remains valid; re-run on or after that date.")
+
+    # Corpus integrity: prove this run uses exactly the frozen tasks, prompts, contracts and revisions.
+    integrity = corpus_integrity(manifest)
+    if not integrity["ok"]:
+        raise SystemExit("REFUSING TO RUN: the corpus has drifted from the frozen manifest — "
+                         + "; ".join(integrity["drift"][:6])
+                         + "\nThe manifest must not be edited after a result has been seen. Re-freeze "
+                           "as a NEW corpus with a new name if the tasks genuinely need to change.")
+    print(f"corpus integrity OK: manifest sha256 {integrity['manifest_sha256_frozen'][:16]}…, "
+          f"{integrity['task_count']} tasks, 0 drift", flush=True)
+
     work = Path("/tmp/sg-bench-run")
     work.mkdir(parents=True, exist_ok=True)
     sentinel = find_sentinel()
@@ -1000,13 +1087,30 @@ def run(agent_timeout: int = 420, only: list[str] | None = None,
     usable, reason = adapter.available()
     agent_identity = {"name": adapter.name, "mode": adapter.mode, "available": usable,
                       "availability_reason": reason,
-                      "planned_at_freeze": (manifest.get("agent") or {}).get("name")}
+                      "planned_at_freeze": (manifest.get("agent") or {}).get("name"),
+                      "run_label": agent, "not_before": cfg["not_before"]}
     if not usable:
+        # Record the unavailable attempt rather than only printing it, so the run is auditable and no
+        # other agent can be quietly substituted for it later.
+        results_path.write_text(json.dumps(_portable_results({
+            "schema": "shipguard/benchmark-results/v1",
+            "run_label": agent, "started_at": _now(), "finished_at": _now(),
+            "manifest_sha256": manifest.get("manifest_sha256"),
+            "corpus_integrity": integrity,
+            "arms": ARMS, "arm_pairing": ARM_PAIRING,
+            "agent": agent_identity, "verifier": manifest.get("verifier"),
+            "status": "UNAVAILABLE_RUN",
+            "note": ("The authorised provider could not serve this run. No agent session was started, "
+                     "no model output was fabricated, and no other agent was substituted. Zero tasks "
+                     "were executed, so no detection or repair rate may be inferred from this file."),
+            "summary": summarize([]), "results": []}),
+            indent=2, ensure_ascii=False) + "\n")
         raise SystemExit(
             f"REFUSING TO RUN: the {agent} provider is not usable — {reason}\n"
-            "No model activity will be fabricated and no offline/scripted candidate will be "
-            "substituted. Restore the provider (re-authenticate, or wait for the quota reset) and "
-            "re-run; the frozen manifest and corpus are unchanged and remain valid.")
+            f"An UNAVAILABLE_RUN record was written to {results_path.name}. No model activity will be "
+            "fabricated and no offline/scripted candidate or substitute agent will be used. Restore "
+            "the provider (re-authenticate, or wait for the quota reset) and re-run; the frozen "
+            "manifest and corpus are unchanged and remain valid.")
     if agent_identity["planned_at_freeze"] and agent != agent_identity["planned_at_freeze"]:
         print(f"NOTE: the manifest planned agent={agent_identity['planned_at_freeze']!r}; this run "
               f"uses {agent!r}. Corpus, prompts, contracts and oracle are unchanged from the freeze.",
@@ -1015,20 +1119,27 @@ def run(agent_timeout: int = 420, only: list[str] | None = None,
     tasks = [t for t in TASKS if not only or t["id"] in only]
     if not tasks:
         raise SystemExit(f"no corpus task matched {only!r} — refusing to report an empty benchmark")
+    if only and len(tasks) != len(TASKS):
+        print(f"WARNING: running a SUBSET ({len(tasks)}/{len(TASKS)} tasks). A subset must never be "
+              "reported as the benchmark; the results file records which tasks were run.", flush=True)
 
     results: list[dict] = []
     started = _now()
-    if RESULTS.exists():                              # resume: never silently re-run a completed cell
-        prior = json.loads(RESULTS.read_text()).get("results", [])
+    if results_path.exists():                         # resume: never silently re-run a completed cell
+        prior_doc = json.loads(results_path.read_text())
+        prior = prior_doc.get("results", [])
         done = {(r["task"], r["arm"]) for r in prior}
         results.extend(prior)
-        started = json.loads(RESULTS.read_text()).get("started_at", started)
+        started = prior_doc.get("started_at", started)
     else:
         done = set()
 
     def _flush() -> None:
-        RESULTS.write_text(json.dumps(_portable_results({
+        results_path.write_text(json.dumps(_portable_results({
             "schema": "shipguard/benchmark-results/v1",
+            "run_label": agent,
+            "tasks_executed": sorted({r["task"] for r in results}),
+            "corpus_integrity": integrity,
             "started_at": started, "finished_at": _now(),
             "manifest_sha256": manifest.get("manifest_sha256"),
             # The manifest pins the harness that VALIDATED the corpus; this pins the harness that
@@ -1078,20 +1189,22 @@ def run(agent_timeout: int = 420, only: list[str] | None = None,
                                 if (a.get("agent") or {}).get("outcome") == "unavailable"), ""))
                 raise SystemExit(
                     f"STOPPING: the {agent} provider became unavailable during the run — {why}\n"
-                    f"{len(results)} cell(s) were recorded to {RESULTS.name} before the stop; the "
+                    f"{len(results)} cell(s) were recorded to {results_path.name} before the stop; the "
                     "rest were NOT run. Nothing was fabricated and no stand-in agent was used. "
                     "Restore the provider and re-run: already-recorded cells are skipped.")
     _flush()
     return {"results": results, "summary": summarize(results)}
 
 
-REPORT = REPO_ROOT / "BENCHMARK-REPORT-v0.2.0.md"
-
-
-def report() -> str:
+def report(agent: str = "claude") -> str:
     """Render BENCHMARK-REPORT-v0.2.0.md FROM the artifacts, so no number is hand-transcribed."""
     manifest = json.loads(MANIFEST.read_text())
-    payload = json.loads(RESULTS.read_text())
+    cfg = RUNS[agent]
+    report_path: Path = cfg["report"]
+    results_name = cfg["results"].name
+    if not cfg["results"].exists():
+        raise SystemExit(f"no results for the {agent} run — run it first")
+    payload = json.loads(cfg["results"].read_text())
     results = payload["results"]
     s = summarize(results)
     ab = [r for r in results if r.get("arm") == "AB"]
@@ -1103,7 +1216,7 @@ def report() -> str:
     a("# Actenon ShipGuard v0.2.0 — real-world benchmark report")
     a("")
     a(f"Generated from `BENCHMARK-MANIFEST-v0.2.0.json` (sha256 `{manifest['manifest_sha256']}`) and "
-      f"`BENCHMARK-RESULTS-v0.2.0.json` by `benchmark/harness.py report`. Every number below is read "
+      f"`{results_name}` by `benchmark/harness.py report {agent}`. Every number below is read "
       f"from those artifacts; none is transcribed by hand.")
     a("")
     a(f"- Run window: {payload.get('started_at')} → {payload.get('finished_at')}")
@@ -1406,15 +1519,148 @@ def report() -> str:
       "else — corpus selection, contracts, validation, aggregation and this document — is "
       "deterministic from the pinned commits.")
     a("")
-    REPORT.write_text("\n".join(L) + "\n")
-    return REPORT.read_text()
+    report_path.write_text("\n".join(L) + "\n")
+    return report_path.read_text()
+
+
+def compare() -> str:
+    """Render BENCHMARK-COMPARISON-v0.2.0.md from the per-run artifacts, with the confounds stated.
+
+    A cross-model comparison on six tasks is not a controlled experiment: the runs differ in model,
+    date, environment and sampling. This document exists so those differences are stated next to the
+    numbers rather than left for a reader to discover.
+    """
+    manifest = json.loads(MANIFEST.read_text())
+    docs: dict[str, dict] = {}
+    for name, cfg in RUNS.items():
+        if not cfg["results"].exists():
+            continue
+        docs[name] = json.loads(cfg["results"].read_text())
+    if not docs:
+        raise SystemExit("no benchmark results to compare")
+
+    L: list[str] = []
+    a = L.append
+    a("# Actenon ShipGuard v0.2.0 — cross-run comparison")
+    a("")
+    a(f"Generated from the per-run artifacts by `benchmark/harness.py compare`. Frozen corpus: "
+      f"`BENCHMARK-MANIFEST-v0.2.0.json` sha256 `{manifest['manifest_sha256']}`.")
+    a("")
+    a("## Runs compared")
+    a("")
+    a("| run | artifact | status | window | agent availability |")
+    a("|---|---|---|---|---|")
+    for name, d in docs.items():
+        ag = d.get("agent") or {}
+        status = d.get("status") or f"{len(d.get('results', []))} cells recorded"
+        a(f"| `{name}` | `{RUNS[name]['results'].name}` | {status} | {d.get('started_at')} → "
+          f"{d.get('finished_at')} | {ag.get('availability_reason')} |")
+    a("")
+
+    a("## Corpus identity")
+    a("")
+    hashes = {n: (d.get("manifest_sha256"),
+                  (d.get("corpus_integrity") or {}).get("manifest_sha256_recomputed"))
+              for n, d in docs.items()}
+    same = len({v[0] for v in hashes.values()}) == 1
+    a(f"All runs used the same frozen manifest: **{same}**.")
+    for n, (frozen, recomputed) in hashes.items():
+        a(f"- `{n}`: manifest sha256 `{(frozen or 'unrecorded')[:24]}…`"
+          + (f", recomputed at run time `{(recomputed or 'n/a')[:24]}…`" if recomputed else "")
+          + (" — the Claude run predates run-time corpus-integrity checking, so its identity rests on "
+             "the manifest hash alone" if not recomputed else ""))
+    a("")
+
+    a("## Headline numbers")
+    a("")
+    a("| metric | " + " | ".join(f"`{n}`" for n in docs) + " |")
+    a("|---" * (len(docs) + 1) + "|")
+    summaries = {n: summarize(d.get("results", [])) for n, d in docs.items()}
+    rows = [
+        ("sessions (arms A/B)", lambda s: s["arm_AB"]["sessions"]),
+        ("agent produced a change", lambda s: s["arm_AB"]["agent_made_a_change"]),
+        ("independently VERIFIED", lambda s: s["arm_AB"]["independently_correct"]),
+        ("arm A false accepts", lambda s: s["arm_AB"]["arm_A_false_accepts"]),
+        ("arm B false accepts", lambda s: s["arm_AB"]["arm_B_false_accepts"]),
+        ("aspirin instances (green tests + real defect)",
+         lambda s: s["arm_AB"]["defects_invisible_to_ordinary_tests"]),
+        ("provider unavailable sessions", lambda s: s["arm_AB"]["provider_unavailable"]),
+        ("arm C verified", lambda s: s["arm_C"]["verified"]),
+        ("arm C verified AFTER a repair", lambda s: s["arm_C"]["verified_after_repair"]),
+        ("committed tree byte-identical", lambda s: s["arm_C"]["tree_binding_equivalent"]),
+        ("arm C agent seconds", lambda s: s["arm_C"]["agent_seconds_total"]),
+        ("arm C verification seconds", lambda s: s["arm_C"]["verification_seconds_total"]),
+    ]
+    for label, get in rows:
+        a(f"| {label} | " + " | ".join(str(get(summaries[n])) for n in docs) + " |")
+    a("")
+
+    a("## Per-task outcome")
+    a("")
+    a("| task | " + " | ".join(f"`{n}` verdict / correct" for n in docs) + " |")
+    a("|---" * (len(docs) + 1) + "|")
+    for t in manifest["tasks"]:
+        cells = []
+        for n, d in docs.items():
+            r = next((x for x in d.get("results", [])
+                      if x.get("task") == t["id"] and x.get("arm") == "AB"), None)
+            if r is None:
+                cells.append("not run")
+            else:
+                cells.append(f"{(r.get('independent_verification') or {}).get('verdict')} / "
+                             f"{r.get('ground_truth_correct')}")
+        a(f"| `{t['id']}` | " + " | ".join(cells) + " |")
+    a("")
+
+    a("## Why these runs are NOT directly comparable")
+    a("")
+    a("Stated explicitly, as authorised, so the table above is not read as a model bake-off:")
+    a("")
+    a("- **Different models.** Each run used a different coding agent, with different training, "
+      "different default reasoning effort and different tool-confinement mechanisms (Codex: "
+      "`--sandbox workspace-write`; Claude: `acceptEdits` plus a file-only tool allowlist). A "
+      "difference in outcome is not attributable to the model alone.")
+    a("- **Different execution dates.** The runs are days apart. Both providers are hosted services "
+      "that can change underneath us; neither run pins a model snapshot, only a CLI version.")
+    a("- **Different environments.** Different working directories, different machine load, and a "
+      "different provider quota state. The oracle, corpus, contracts and prompts are identical; the "
+      "execution context is not.")
+    a("- **Sampling.** One session per task per arm. There is no repetition, so no variance estimate "
+      "and no confidence interval. A single correct or incorrect outcome per task is an observation, "
+      "not a rate.")
+    a("- **Ceiling effect.** If both agents solve all six tasks, the corpus cannot discriminate "
+      "between them, and 'both scored 6/6' carries no information about which is better. That is a "
+      "property of the corpus, not a finding about the models.")
+    a("")
+    a("## What a comparison here can and cannot support")
+    a("")
+    a("Can support: whether the pipeline reproduced its verification behaviour across two different "
+      "live providers on the same frozen corpus; whether either provider produced a defect that the "
+      "ordinary tests missed; whether either needed a counterexample-driven repair.")
+    a("")
+    a("Cannot support: any claim that one model is better than the other, any detection or repair "
+      "rate, any reliability improvement, or any generalisation beyond these six tasks.")
+    a("")
+    a("## Next evaluation (separate, prospectively frozen)")
+    a("")
+    a("A larger corpus across more repositories must be selected, validated and frozen **before** any "
+      "agent runs on it, under its own manifest name, and must not be built by extending this one "
+      "after seeing these results. The measured constraints that shaped this corpus are recorded in "
+      "`selection_process.measured_corpus_constraints` and apply unchanged: the pinned oracle runs its "
+      "own vitest over every `*.test.*` file with zero installs, probes call one exported function "
+      "with JSON arguments, and its mandatory `preserved-tests` replay means a correct fix that "
+      "alters an existing assertion can never be VERIFIED.")
+    a("")
+    COMPARISON.write_text("\n".join(L) + "\n")
+    return COMPARISON.read_text()
 
 
 if __name__ == "__main__":
     argv = sys.argv[1:]
     cmd = argv[0] if argv else "validate"
-    agent = "codex"
-    if "--agent" in argv:                       # consume the flag AND its value before filtering
+    agent = "claude"        # the completed run; a Codex run must ask for itself explicitly
+    agent_given = "--agent" in argv
+    if agent_given:                             # consume the flag AND its value before filtering
         i = argv.index("--agent")
         agent = argv[i + 1]
         argv = argv[:i] + argv[i + 2:]
@@ -1434,14 +1680,22 @@ if __name__ == "__main__":
     elif cmd == "freeze":
         freeze()
     elif cmd == "run":
+        if not agent_given:
+            raise SystemExit("`run` needs an explicit --agent claude|codex, so a benchmark can never "
+                             "be executed against an agent nobody chose")
         arms = tuple(a.upper() for a in rest if a.upper() in ("AB", "C")) or ("AB", "C")
         only = [a for a in rest if a.upper() not in ("AB", "C")] or None
         out = run(only=only, arms=arms, agent=agent)
         print(json.dumps(out["summary"], indent=2))
     elif cmd == "summarize":
-        print(json.dumps(summarize(json.loads(RESULTS.read_text())["results"]), indent=2))
+        print(json.dumps(summarize(json.loads(RUNS[agent]["results"].read_text())["results"]), indent=2))
+    elif cmd == "integrity":
+        print(json.dumps(corpus_integrity(json.loads(MANIFEST.read_text())), indent=2))
     elif cmd == "report":
-        report()
-        print(f"wrote {REPORT.name}")
+        report(agent)
+        print(f"wrote {RUNS[agent]['report'].name}")
+    elif cmd == "compare":
+        compare()
+        print(f"wrote {COMPARISON.name}")
     else:
         raise SystemExit(f"unknown command {cmd!r}")

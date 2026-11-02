@@ -1,6 +1,6 @@
 # Actenon ShipGuard v0.2.0 — real-world benchmark report
 
-Generated from `BENCHMARK-MANIFEST-v0.2.0.json` (sha256 `a380a1b7f30756d5af3026a94ec3f33f996d888f6819e048341ab0465c36d6cc`) and `BENCHMARK-RESULTS-v0.2.0.json` by `benchmark/harness.py report`. Every number below is read from those artifacts; none is transcribed by hand.
+Generated from `BENCHMARK-MANIFEST-v0.2.0.json` (sha256 `a380a1b7f30756d5af3026a94ec3f33f996d888f6819e048341ab0465c36d6cc`) and `BENCHMARK-RESULTS-v0.2.0.json` by `benchmark/harness.py report claude`. Every number below is read from those artifacts; none is transcribed by hand.
 
 - Run window: 2026-11-02T13:43:39.012699Z → 2026-11-02T13:53:04.739819Z
 - Harness that RAN this benchmark: `benchmark/harness.py` sha256 `af6c49d6f938d5851805271d2ddd9c7697382eecf54a3fbf047a79cd39976157` at git `9bbe0f76a7cba467fad75763484bd23b96b5c6d1` (repo dirty=True — the release-evidence document was being edited while the run executed; the harness file itself was committed)
