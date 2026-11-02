@@ -8,16 +8,53 @@ of success must never substitute for independent evidence that the change satisf
 approved requirements** — and, for explicitly protected operations, a consequential action
 must not execute without authority *and* verified correctness.
 
-The **v0.1.2 security-remediation pre-release** is published: the protected-execution trust
-boundary is complete and adversarially tested (31 tests, still passing unchanged inside the current
-127), the enforcer holds **no signing key**, and the wheel installs non-editably and runs from an
-unrelated cwd. **v0.2.0 (the real coding-agent repair loop) is in development and is NO-GO** on the
-`v0.2.0` branch: its independent real-world benchmark found the live agent was already correct on all
-6 frozen tasks, so there were **0 detections and 0 repairs** to support the "catches what your tests
-miss" claim — see [`BENCHMARK-REPORT-v0.2.0.md`](BENCHMARK-REPORT-v0.2.0.md) and
-[`RELEASE-EVIDENCE-v0.2.0.md`](RELEASE-EVIDENCE-v0.2.0.md). Memory transfer, attestation verification
-and npm distribution remain **explicit release blockers**, tracked in
-[`RELEASE-EVIDENCE.md`](RELEASE-EVIDENCE.md) and
+Two pre-releases are published, and they claim **different things**.
+
+**`v0.1.2`** — the security-remediation pre-release: the protected-execution trust boundary is
+complete and adversarially tested (31 tests, still passing byte-identical inside the current 128), the
+enforcer holds **no signing key**, and the wheel installs non-editably and runs from an unrelated cwd.
+PR #1 was merged to `main` with a **merge commit** on 2026-11-02, so `main` now matches that published
+tag; the tag itself was not moved and its history was not rewritten.
+
+**`v0.2.0-preview.1`** (distribution version `0.2.0rc1`) — a **scoped verification-only developer
+preview**. What it claims, and what it deliberately does not:
+
+| Claimed (measured) | **Not** claimed |
+|---|---|
+| Real coding-agent integration — a live model makes the change | Demonstrated detection of live-agent defects |
+| Independent acceptance verification by a pinned external oracle | Successful live counterexample-driven repair |
+| Approved change-scope enforcement from the real diff | General correctness |
+| Candidate-to-commit identity checking (committed tree proven byte-identical to the verified candidate) | Any measured reliability improvement |
+| Evidence reporting within the tested scope | Production-grade hostile-agent containment |
+
+**The benchmark result is null and is reported prominently, not buried.** Across 6 frozen real
+historical defects in 3 independently maintained projects, Claude Code produced a correct fix on all 6
+at its first attempt. Independent verification agreed 6/6 and each project's own suite agreed 6/6, so
+there were **0 additional defects detected and 0 repairs performed**. See
+[`BENCHMARK-REPORT-v0.2.0.md`](BENCHMARK-REPORT-v0.2.0.md) and
+[`RELEASE-EVIDENCE-v0.2.0.md`](RELEASE-EVIDENCE-v0.2.0.md).
+
+Read that result carefully, because the two halves are easy to conflate:
+
+- **0 false accepts on correct candidates** is what was measured. The oracle never rejected a change
+  that was actually right — useful evidence that verification does not cry wolf.
+- That is **not** a measured ability to detect *incorrect* candidates. No incorrect candidate was ever
+  produced by the live agent, so detection rate was never exercised and is **unknown**, not zero and
+  not high. The only contradictions observed in this milestone came from seeded fixture defects and
+  from the corpus's own pre-fix baselines, not from live-agent output.
+
+**Validating this yourself requires the reproduction workflow.** The committed run records are
+portable: they deliberately do **not** contain the original raw Sentinel receipts, because those
+receipts are content-addressed and embed absolute machine-local paths (`git.root` and the scratch
+execution directories). Shipping them would leak local filesystem layout and would not verify anywhere
+else. The portable records keep the receipt hashes, verdicts, requirement outcomes, counterexamples and
+integrity results — enough to audit the *logic*, not enough to re-verify cryptographically offline. To
+check the receipts themselves, run the documented reproduction workflow in
+[`BENCHMARK-REPORT-v0.2.0.md`](BENCHMARK-REPORT-v0.2.0.md) §8, which rebuilds the pinned oracle and
+regenerates receipts locally.
+
+Memory transfer, attestation verification and npm distribution remain **explicit release blockers**,
+tracked in [`RELEASE-EVIDENCE.md`](RELEASE-EVIDENCE.md) and
 [`SECURITY-REMEDIATION-v0.1.2.md`](SECURITY-REMEDIATION-v0.1.2.md). Do not mistake the recorded
 PASS output for a v1.0 security guarantee.
 
@@ -75,18 +112,22 @@ actenon-shipguard report --out DIR --open            # render the HTML report
 ```
 
 `actenon-shipguard run "task" --agent codex|claude|offline [--contract C]` (the real coding-agent
-repair loop) is **implemented and tested on the in-development `v0.2.0` branch**: it drives a real
-agent change, runs ordinary tests, and uses the **real Sentinel verifier** (structured receipts) as the
+repair loop) ships in **`v0.2.0-preview.1`**: it drives a real agent change, runs the project's own
+tests, and uses the **real Sentinel verifier** (structured, content-addressed receipts) as the
 independent acceptance authority, feeding a reproducible counterexample back to drive a bounded repair.
-**v0.2.0 is not yet released (NO-GO)** — its independent real-world benchmark ran 6 frozen historical
-defects across 3 third-party projects against a live agent, and the agent was **correct on all 6 first
-attempt**: 0 detections, 0 repairs, 0 false accepts in either arm. The verification pipeline worked
-end to end (6/6 independently verified, every committed tree proven byte-identical to the verified
-candidate, every change inside its allowed file), but that is a *verification* result and gives no
-support to a "catches the defects your tests miss" claim, so that claim is not made. See
+The loop refuses to run without a real authenticated provider — an exhausted quota is recorded as
+`unavailable`, never as a repair failure, and no offline or scripted candidate is substituted.
+
+**The full "developer aspirin" release is still NO-GO.** The independent real-world benchmark ran 6
+frozen historical defects across 3 third-party projects against a live agent, and the agent was
+**correct on all 6 first attempt**: 0 detections, 0 repairs, 0 false accepts in either arm. The
+verification pipeline worked end to end (6/6 independently verified, every committed tree proven
+byte-identical to the verified candidate, every change inside its allowed file), but that is a
+*verification* result and gives no support to a "catches the defects your tests miss" claim, so that
+claim is not made and the preview is scoped accordingly. See
 [`BENCHMARK-REPORT-v0.2.0.md`](BENCHMARK-REPORT-v0.2.0.md) and
-[`RELEASE-EVIDENCE-v0.2.0.md`](RELEASE-EVIDENCE-v0.2.0.md). On the released **v0.1.2**, `run` still
-reports "not wired" rather than faking success.
+[`RELEASE-EVIDENCE-v0.2.0.md`](RELEASE-EVIDENCE-v0.2.0.md). On **v0.1.2**, `run` still reports
+"not wired" rather than faking success.
 
 ### What `demo` proves (real, measured)
 
@@ -127,13 +168,14 @@ and **key-storage isolation** (no private key in the workspace; isolated mode fa
   A *cooperative local* boundary: it proves an action cannot traverse the configured gate without
   policy, but it is **not** an unbypassable OS sandbox — a rogue agent that refuses to call the gate
   is not stopped by it. Hard containment needs Actenon airlock Protected Mode + containers.
-- **Mode A — local development repair loop: implemented + tested on the `v0.2.0` branch, not yet
-  released.** Real Sentinel is the acceptance authority. Provider availability is probed at run time,
+- **Mode A — local development repair loop: shipped in `v0.2.0-preview.1`, scoped to verification
+  only.** Real Sentinel is the acceptance authority. Provider availability is probed at run time,
   never assumed: the benchmark ran on **live Claude Code** (`acceptEdits` + a file-only tool allowlist,
   no permission-bypass flag) after Codex's usage limit was exhausted; an unavailable provider is
   recorded as `unavailable` and the run refuses to proceed rather than fabricating model activity.
-  v0.2.0 is **NO-GO**: the benchmark produced 0 detections and 0 repairs because the agent was already
-  correct on all 6 tasks (see `BENCHMARK-REPORT-v0.2.0.md`, `RELEASE-EVIDENCE-v0.2.0.md`).
+  The **defect-detection and automatic-repair benefit is not established**: the benchmark produced 0
+  detections and 0 repairs because the agent was already correct on all 6 tasks (see
+  `BENCHMARK-REPORT-v0.2.0.md`, `RELEASE-EVIDENCE-v0.2.0.md`). Testing of that claim continues.
 - **Mode B — PR protection / GitHub Actions: scaffolded, not validated** (workflow present, unrun).
 
 ## Relationship to the ecosystem

@@ -307,14 +307,15 @@ def evaluate_receipt(receipt: dict, approved_contract: dict, *, receipt_hash: st
                 reasons.append(f"receipt failed content-address check: key {receipt_hash[:12]}… "
                                f"!= sha256(bytes) {actual[:12]}…")
         obj_problems: list[str] = []
-        baseline_snap = _load_object(store, receipt.get("baselineHash") or "", "baseline-snapshot", obj_problems)
+        # loaded for its content-address verification (recorded via obj_problems); value not needed
+        _load_object(store, receipt.get("baselineHash") or "", "baseline-snapshot", obj_problems)
         candidate_snap = _load_object(store, receipt.get("candidateHash") or "", "candidate-snapshot", obj_problems)
         contract_obj = _load_object(store, receipt.get("contractHash") or "", "contract", obj_problems) \
             if receipt.get("contractHash") else None
         integrity["referenced_objects_ok"] = not obj_problems
         reasons.extend(obj_problems)
     else:
-        baseline_snap = candidate_snap = contract_obj = None
+        candidate_snap = contract_obj = None
 
     # ---- 3. Schema / vocabulary correctness --------------------------------------------- #
     sv = receipt.get("schemaVersion")
