@@ -206,6 +206,14 @@ def clone_isolated(src_repo: Path, work: Path, node_modules: Path | None = None)
     dest.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", str(src_repo), str(dest)],
                    check=True, capture_output=True)
+    # A clone does NOT inherit the source's local git config, and a machine (or CI runner) may have
+    # no global identity at all — without one, committing the verified candidate dies with exit 128.
+    # The identity is ShipGuard's own, stated as such: these commits are made by the verifier in a
+    # disposable clone, never by the developer, and the developer's tree is never touched.
+    for args in (["config", "user.email", "shipguard@actenon.local"],
+                 ["config", "user.name", "Actenon ShipGuard (isolated verification clone)"],
+                 ["config", "commit.gpgsign", "false"]):
+        subprocess.run(["git", "-C", str(dest), *args], check=True, capture_output=True)
     nm_src = Path(node_modules) if node_modules else (src_repo / "node_modules")
     if nm_src.exists() and not (dest / "node_modules").exists():
         (dest / "node_modules").symlink_to(nm_src, target_is_directory=True)

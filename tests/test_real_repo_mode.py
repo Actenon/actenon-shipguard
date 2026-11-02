@@ -11,6 +11,7 @@ without model calls. It is labelled offline-deterministic and is NOT a live mode
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,7 +21,7 @@ import pytest
 import actenon_shipguard as _sg
 from actenon_shipguard.adapters.base import AgentResult, git_diff
 from actenon_shipguard.orchestrator import (
-    clone_isolated, inspect_project, repo_fingerprint, run_task,
+    _commit_candidate, clone_isolated, inspect_project, repo_fingerprint, run_task,
 )
 from actenon_shipguard.sentinel import find_sentinel
 
@@ -232,3 +233,36 @@ def test_contract_is_immutable_during_execution(tmp_path):
                    evidence_dir=tmp_path / "ev", source_repo=proj, target_file=MODULE, export="allocate")
     assert rec.final_status == "review_required"
     assert "TAMPER" in rec.states
+
+
+def test_clone_isolated_can_commit_without_any_global_git_identity(tmp_path, monkeypatch):
+    """A clone does not inherit the source repo's local git config.
+
+    CI runners and freshly provisioned machines often have no global `user.email`/`user.name`, and
+    committing the verified candidate then dies with exit 128 — which is how this was caught. The
+    isolated clone must carry its own identity so safe mode does not depend on the host's git config.
+    """
+    empty_home = tmp_path / "no-home"
+    empty_home.mkdir()
+    monkeypatch.setenv("HOME", str(empty_home))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+
+    repo = _make_real_repo(tmp_path / "proj")           # sets its own LOCAL identity
+    before = repo_fingerprint(repo)
+    clone = clone_isolated(repo, tmp_path / "work", NODE_MODULES)
+
+    ident = subprocess.run(["git", "-C", str(clone), "config", "user.email"],
+                           capture_output=True, text=True, check=True).stdout.strip()
+    assert ident, "the isolated clone has no commit identity of its own"
+
+    (clone / MODULE).write_text((clone / MODULE).read_text() + "\n// verified repair\n")
+    head = _commit_candidate(clone, "verified change", [MODULE])
+    assert re.fullmatch(r"[0-9a-f]{40}", head), head
+    author = subprocess.run(["git", "-C", str(clone), "log", "-1", "--format=%an <%ae>"],
+                            capture_output=True, text=True, check=True).stdout.strip()
+    assert "ShipGuard" in author, f"the commit must be attributed to ShipGuard, not the developer: {author}"
+    # the developer's repository never gained a commit or a config change
+    assert repo_fingerprint(repo) == before
+    assert subprocess.run(["git", "-C", str(repo), "log", "--oneline"], capture_output=True,
+                          text=True, check=True).stdout.count("\n") == 2
