@@ -459,16 +459,22 @@ ARM_PAIRING = (
 )
 
 
-def _common(task: dict, work: Path) -> tuple[Path, Path]:
+def _common(task: dict, work: Path, frozen: dict) -> tuple[Path, Path]:
+    """Write the FROZEN contract for this task, byte-for-byte from the manifest.
+
+    Recomputing it from TASKS (or reusing a file left over from an earlier corpus) could silently
+    diverge from what was validated and hashed before the freeze; ShipGuard's integrity layer would
+    then reject every receipt. The manifest is the only source.
+    """
     contract = work / f"{task['id']}-contract.json"
-    if not contract.exists():
-        contract.write_text(json.dumps(contract_for(task), ensure_ascii=False))
+    contract.write_text(json.dumps(frozen["contracts"][task["id"]], ensure_ascii=False))
     return contract, work / f"store-{task['id']}"
 
 
-def run_arm_no_repair(task: dict, work: Path, arm: str, sentinel, agent_timeout: int) -> dict:
+def run_arm_no_repair(task: dict, work: Path, arm: str, sentinel, agent_timeout: int,
+                      frozen: dict) -> dict:
     """Arms A and B: one fresh agent session, no verification feedback, no repair."""
-    contract, store = _common(task, work)
+    contract, store = _common(task, work, frozen)
     repo = materialize(task, work, at="baseline")
     before = repo_fingerprint(repo)
     adapter = CodexAdapter()
@@ -504,9 +510,10 @@ def run_arm_no_repair(task: dict, work: Path, arm: str, sentinel, agent_timeout:
     return out
 
 
-def run_arm_repair(task: dict, work: Path, sentinel, agent_timeout: int, max_attempts: int = 1) -> dict:
+def run_arm_repair(task: dict, work: Path, sentinel, agent_timeout: int, frozen: dict,
+                   max_attempts: int = 1) -> dict:
     """Arm C: ShipGuard's bounded counterexample-driven repair loop on a REAL project baseline."""
-    contract, store = _common(task, work)
+    contract, store = _common(task, work, frozen)
     out_dir = work / f"arm-C-{task['id']}"
     out_dir.mkdir(parents=True, exist_ok=True)
     return _repair_loop(task, work, contract, store, sentinel, agent_timeout, max_attempts, out_dir)
@@ -991,6 +998,17 @@ def run(agent_timeout: int = 420, only: list[str] | None = None,
             "schema": "shipguard/benchmark-results/v1",
             "started_at": started, "finished_at": _now(),
             "manifest_sha256": manifest.get("manifest_sha256"),
+            # The manifest pins the harness that VALIDATED the corpus; this pins the harness that
+            # RAN it, so neither artifact has to be regenerated to stay self-consistent.
+            "run_harness": {
+                "path": "benchmark/harness.py",
+                "sha256": hashlib.sha256(
+                    (REPO_ROOT / "benchmark" / "harness.py").read_bytes()).hexdigest(),
+                "git_head": _sh(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT,
+                                check=False).stdout.strip(),
+                "git_dirty": bool(_sh(["git", "status", "--porcelain"], cwd=REPO_ROOT,
+                                      check=False).stdout.strip()),
+            },
             "arms": ARMS, "arm_pairing": ARM_PAIRING,
             "agent": manifest.get("agent"), "verifier": manifest.get("verifier"),
             "summary": summarize(results), "results": results}),
@@ -1003,9 +1021,9 @@ def run(agent_timeout: int = 420, only: list[str] | None = None,
                 continue
             print(f"[{arm}] {task['id']} …", flush=True)
             if arm == "AB":
-                r = run_arm_no_repair(task, work, "AB", sentinel, agent_timeout)
+                r = run_arm_no_repair(task, work, "AB", sentinel, agent_timeout, manifest)
             elif arm == "C":
-                r = run_arm_repair(task, work, sentinel, agent_timeout)
+                r = run_arm_repair(task, work, sentinel, agent_timeout, manifest)
             else:
                 raise SystemExit(f"unknown arm {arm!r} (use AB and/or C)")
             r["recorded_at"] = _now()
