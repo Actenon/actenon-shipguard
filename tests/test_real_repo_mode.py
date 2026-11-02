@@ -14,6 +14,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -41,8 +42,25 @@ def _resolve_nm():
     return next((p for p in cands if (p / ".bin" / "vitest").exists()), None)
 
 
-NODE_MODULES = _resolve_nm()
-needs_sentinel = pytest.mark.skipif(SENTINEL is None or NODE_MODULES is None,
+def _stub_node_modules() -> Path:
+    """The hermetic tests only need *a* directory to symlink as shared dependencies.
+
+    A CI runner has no sibling Sentinel checkout, and `Path.symlink_to(None)` raises TypeError, so
+    without this the safe-mode mechanics would be untestable exactly where they most need testing.
+    Tests that actually EXECUTE vitest are marked sentinel_integration and still require the real
+    thing (see `needs_sentinel`), so the stub cannot mask a missing prerequisite.
+    """
+    d = Path(tempfile.mkdtemp(prefix="sg-stub-node-modules-"))
+    (d / ".bin").mkdir()
+    vitest = d / ".bin" / "vitest"
+    vitest.write_text("#!/bin/sh\nexit 0\n")
+    vitest.chmod(0o755)
+    return d
+
+
+REAL_NODE_MODULES = _resolve_nm()
+NODE_MODULES = REAL_NODE_MODULES or _stub_node_modules()
+needs_sentinel = pytest.mark.skipif(SENTINEL is None or REAL_NODE_MODULES is None,
                                     reason="real sentinel CLI or node_modules(vitest) unavailable")
 
 

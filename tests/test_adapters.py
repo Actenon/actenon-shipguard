@@ -16,7 +16,15 @@ from actenon_shipguard.adapters.codex import CodexAdapter
 from actenon_shipguard.adapters.offline import OfflineAdapter
 
 
+def _stub_cli(monkeypatch, *names):
+    """Pretend the named agent CLIs are installed. These tests assert adapter behaviour, and a CI
+    runner has no codex/claude binary; without this they silently depend on the host."""
+    monkeypatch.setattr("shutil.which", lambda name, *a, **k: f"/usr/local/bin/{name}"
+                        if name in names else None)
+
+
 def test_claude_disabled_without_consent_does_not_fabricate(tmp_path, monkeypatch):
+    _stub_cli(monkeypatch, "claude")
     monkeypatch.delenv("SHIPGUARD_ENABLE_LIVE_CLAUDE", raising=False)
     called = {"n": 0}
 
@@ -33,6 +41,7 @@ def test_claude_disabled_without_consent_does_not_fabricate(tmp_path, monkeypatc
 
 
 def test_claude_command_uses_supported_controls_not_dangerous_flag(tmp_path, monkeypatch):
+    _stub_cli(monkeypatch, "claude")
     monkeypatch.setenv("SHIPGUARD_ENABLE_LIVE_CLAUDE", "1")
     cmds: list[list[str]] = []
 
@@ -51,6 +60,7 @@ def test_claude_command_uses_supported_controls_not_dangerous_flag(tmp_path, mon
 
 
 def test_codex_uses_workspace_write_sandbox_never_bypass(tmp_path, monkeypatch):
+    _stub_cli(monkeypatch, "codex")
     cmds: list[list[str]] = []
 
     def _capture(cmd, cwd, timeout):
@@ -67,6 +77,8 @@ def test_codex_uses_workspace_write_sandbox_never_bypass(tmp_path, monkeypatch):
 
 
 def test_codex_unauthenticated_is_unavailable(tmp_path, monkeypatch):
+    _stub_cli(monkeypatch, "codex")
+
     def _no_auth(cmd, cwd, timeout):
         return 1, "", "not logged in", False
 
@@ -91,6 +103,8 @@ _QUOTA_STDERR = ("ERROR: You\u2019ve hit your usage limit. Visit "
 
 
 def _stub_codex(monkeypatch, *, exit_code, stdout="", stderr=_QUOTA_STDERR, changed=()):
+    _stub_cli(monkeypatch, "codex")
+
     def _run(cmd, cwd, timeout):
         if "login" in cmd and "status" in cmd:
             return 0, "Logged in using ChatGPT", "", False
