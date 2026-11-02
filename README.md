@@ -8,11 +8,14 @@ of success must never substitute for independent evidence that the change satisf
 approved requirements** — and, for explicitly protected operations, a consequential action
 must not execute without authority *and* verified correctness.
 
-This is a **v0.1.0 pre-release**. The protected-execution trust boundary is complete and
-adversarially tested; the real coding-agent repair loop, memory transfer, attestation
-verification, benchmarks and npm distribution are **explicit release blockers** tracked in
-[`RELEASE-EVIDENCE.md`](RELEASE-EVIDENCE.md). Do not mistake the recorded PASS output for a
-v1.0 security guarantee.
+The **v0.1.2 security-remediation pre-release** is published: the protected-execution trust
+boundary is complete and adversarially tested (31 tests), the enforcer holds **no signing key**,
+and the wheel installs non-editably and runs from an unrelated cwd. **v0.2.0 (the real
+coding-agent repair loop) is in development** on the `v0.2.0` branch. The real-agent loop,
+memory transfer, attestation verification, benchmarks and npm distribution remain **explicit
+release blockers** tracked in [`RELEASE-EVIDENCE.md`](RELEASE-EVIDENCE.md) and
+[`SECURITY-REMEDIATION-v0.1.2.md`](SECURITY-REMEDIATION-v0.1.2.md). Do not mistake the recorded
+PASS output for a v1.0 security guarantee.
 
 ---
 
@@ -36,7 +39,7 @@ and a dispatched action cannot be blindly replayed (durable atomic nonce).
 
 | Party | Holds | Can |
 |---|---|---|
-| Authority issuer | Actenon proof signing key | mint proofs + gate authorizations |
+| Authority issuer | Actenon proof signing key | mint PCCB proofs (no dispatch/handoff capability — the enforcer re-verifies the original evidence) |
 | Correctness prover | certificate signing key | sign correctness certificates |
 | Enforcer (gate/resource) | **only pinned public trust roots** | verify + invoke certified code; **cannot sign** |
 | Requester (coding agent) | **no key** | request; **cannot forge** a cert, proof or authorization |
@@ -68,7 +71,8 @@ actenon-shipguard report --out DIR --open            # render the HTML report
 ```
 
 `actenon-shipguard run "task" --agent claude|codex` (the real coding-agent repair loop) is
-**not wired in v0.1.0** — it reports this honestly rather than faking success.
+**not wired in v0.1.2** — it reports this honestly rather than faking success. It is the
+primary deliverable of the in-development **v0.2.0**.
 
 ### What `demo` proves (real, measured)
 
@@ -80,7 +84,7 @@ actenon-shipguard report --out DIR --open            # render the HTML report
 5a crash mid-effect (nonce reserved, no record)  -> REFUSE  [EXECUTION/EFFECT_UNCERTAIN]
 5b blind retry of uncertain outcome              -> REFUSE  [REPLAY/UNCERTAIN_OUTCOME]
 6 certificate signed by untrusted prover key     -> REFUSE  [CORRECTNESS/CERT_UNTRUSTED]
-7 direct resource call without gate authorization-> REFUSED (no side effect)
+7 enforcer key-less + tampered proof refused     -> REFUSE  [ENFORCEMENT/KEYLESS_ENFORCER]
 ```
 
 The ALLOW in scenario 1 is a **real mediated invocation**: `tsx` imports the exact certified
@@ -90,13 +94,18 @@ The ALLOW in scenario 1 is a **real mediated invocation**: `tsx` imports the exa
 ## Tests
 
 ```bash
-pip install '.[dev]' && pytest -q     # 13 adversarial trust-boundary tests
+pip install '.[dev]' && pytest -q     # 31 adversarial trust-boundary tests
 ```
 
 Covering: mediated invocation, bypass refusal, forged receipt, contract substitution, stale
 receipt, code replacement, untrusted signing key, authority-proof tamper, replay, concurrent
-nonce claim (exactly one winner), crash-with-uncertain-outcome, blind-retry refusal, and nonce
-durability across restart.
+nonce claim (exactly one winner), crash-with-uncertain-outcome, blind-retry refusal, nonce
+durability across restart, **intent-equality authorisation binding** (small-auth-reused-for-larger,
+export/resource/module substitution), **key-less enforcer** (no signing key held; tampered proof
+refused at the only execute path), **cross-domain signature rejection**, **Sentinel receipt
+coverage + anti-fabrication** (zero/unrelated/partial checks; refabricated-and-rehashed receipt),
+**signed nonce reconciliation** (forged signer, wrong effect, no caller callback, fail-closed),
+and **key-storage isolation** (no private key in the workspace; isolated mode fails closed).
 
 ## Modes (honest capability status)
 
