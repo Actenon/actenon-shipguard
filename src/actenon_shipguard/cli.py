@@ -230,10 +230,23 @@ def cmd_run(args) -> int:
     out = Path(args.out)
     work = out / "tmp"                      # disposable (gitignored): candidate repo + verifier store
     approved = Path(args.contract).expanduser() if args.contract else None
+    source_repo = Path(args.repo).expanduser() if args.repo else None
+    if source_repo is not None and approved is None:
+        print("ERROR: --repo (a real developer repository) requires an explicit --contract with the\n"
+              "       developer-approved acceptance requirements. ShipGuard never invents acceptance\n"
+              "       criteria from the agent's own output.", file=sys.stderr)
+        return 2
+    if source_repo is not None and not source_repo.exists():
+        print(f"ERROR: --repo path does not exist: {source_repo}", file=sys.stderr)
+        return 2
+    mode_label = "real-repository (isolated clone)" if source_repo else "synthetic settlement fixture"
+    print(f"  target      : {mode_label} · module={args.module} export={args.export}")
+
     rec = run_task(task=task, adapter=adapter, work=work, sentinel_cli=sentinel_cli,
                    approved_contract=approved, node_modules=node_modules,
                    max_attempts=args.max_attempts, agent_timeout=args.agent_timeout,
-                   runner=args.runner, evidence_dir=out)
+                   runner=args.runner, evidence_dir=out, source_repo=source_repo,
+                   target_file=args.module, export=args.export)
 
     # Durable evidence: the run-record embeds the Sentinel receipt hash, bindings, verdicts and
     # counterexamples. The raw content-addressed receipt stays in the gitignored tmp store (it binds
@@ -252,6 +265,12 @@ def cmd_run(args) -> int:
     last = (rec.attempts[-1].get("challenge") if rec.attempts else {}) or {}
     if last.get("receipt_hash"):
         print(f"  receipt     : {last.get('receipt_hash')}")
+    if rec.tree_binding:
+        tb = rec.tree_binding
+        print(f"  tree binding: commit {str(tb.get('commit'))[:12]} byte-identical to the verified "
+              f"candidate: {tb.get('equivalent')} ({tb.get('files_checked')} files hash-matched)")
+    if rec.original_untouched is not None:
+        print(f"  source repo : original working tree untouched: {rec.original_untouched}")
     print(f"  evidence    : {out / 'run-record.json'}")
     print(f"  report      : {report}")
     if args.open:
@@ -301,6 +320,11 @@ def main(argv=None) -> int:
     p.add_argument("--node-modules", default=None, help="node_modules providing vitest (or set SHIPGUARD_NODE_MODULES)")
     p.add_argument("--contract", default=None,
                    help="path to the developer-approved Sentinel acceptance contract (held out from the agent)")
+    p.add_argument("--repo", default=None,
+                   help="run against a REAL JS/TS repository (cloned into a disposable isolated copy; "
+                        "the original tree is never modified). Requires --contract.")
+    p.add_argument("--module", default="src/settle.ts", help="target module path within the repository")
+    p.add_argument("--export", default="allocate", help="exported function under verification")
     p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_run)
 
     args = ap.parse_args(argv)

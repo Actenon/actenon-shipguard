@@ -16,7 +16,9 @@ Invariants enforced here:
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import shutil
 import subprocess
 import uuid
@@ -63,6 +65,10 @@ class RunRecord:
     allowed_paths: list[str] = field(default_factory=list)
     tree_binding: dict[str, Any] | None = None    # committed tree == verified candidate (Phase 1.4)
     disclosure: dict[str, Any] | None = None      # portable verification disclosure (Phase 1.6)
+    # Phase 2 — real-repository mode: prove the developer's tree was never modified.
+    source_fingerprint_before: dict[str, Any] | None = None
+    source_fingerprint_after: dict[str, Any] | None = None
+    original_untouched: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -100,17 +106,130 @@ def git_head(repo: Path) -> str:
     return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
 
 
-def run_ordinary_tests(repo: Path) -> dict[str, Any]:
-    vitest = repo / "node_modules" / ".bin" / "vitest"
-    if not vitest.exists():
-        return {"ran": False, "passed": None, "summary": "vitest not available (node_modules missing)"}
+def repo_fingerprint(repo: Path) -> dict[str, Any]:
+    """A checkable fingerprint of a repository's committed state and tracked content.
+
+    Used to PROVE the developer's original tree was not modified during a run.
+    """
+    repo = Path(repo)
+    head = git_head(repo)
+    dirty = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
+                           capture_output=True, text=True).stdout.strip()
+    tracked = subprocess.run(["git", "-C", str(repo), "ls-files"],
+                             capture_output=True, text=True).stdout.split()
+    h = hashlib.sha256()
+    for rel in sorted(tracked):
+        p = repo / rel
+        h.update(rel.encode("utf-8"))
+        h.update(p.read_bytes() if p.exists() else b"<missing>")
+    return {"head": head, "dirty": dirty, "tracked_files": len(tracked),
+            "tracked_content_sha256": h.hexdigest()}
+
+
+def inspect_project(repo: Path, module: str, export: str) -> dict[str, Any]:
+    """Decide whether a real repository is a SUPPORTED project type, with explicit reasons if not.
+
+    Supported first scope: a Git repository containing a JS/TS package with a `test` script, whose
+    target module exports a deterministic function with JSON-compatible inputs and outputs.
+    Unsupported projects are rejected clearly rather than verified inaccurately.
+    """
+    repo = Path(repo)
+    problems: list[str] = []
+    info: dict[str, Any] = {"module": module, "export": export}
+
+    if not (repo / ".git").exists():
+        problems.append("not a git repository (Git history is required to bind verification evidence)")
+
+    pkg_path = repo / "package.json"
+    if not pkg_path.exists():
+        problems.append("no package.json — not a supported JavaScript/TypeScript project")
+    else:
+        try:
+            pkg = json.loads(pkg_path.read_text())
+        except Exception as e:  # noqa: BLE001
+            pkg = {}
+            problems.append(f"package.json is not valid JSON: {e}")
+        info["package_name"] = pkg.get("name")
+        info["package_type"] = pkg.get("type")
+        scripts = pkg.get("scripts") or {}
+        info["test_script"] = scripts.get("test")
+        if not scripts.get("test"):
+            problems.append("package.json defines no `test` script — the project's ordinary tests cannot be run")
+
+    mod = repo / module
+    if not mod.exists():
+        problems.append(f"target module {module!r} does not exist in this repository")
+    else:
+        if mod.suffix not in (".ts", ".mts", ".cts", ".js", ".mjs"):
+            problems.append(f"unsupported module type {mod.suffix!r} (supported: .ts/.mts/.cts/.js/.mjs)")
+        src = mod.read_text(errors="replace")
+        patterns = (rf"export\s+(?:async\s+)?function\s+{re.escape(export)}\b",
+                    rf"export\s+(?:const|let|var)\s+{re.escape(export)}\b",
+                    rf"export\s*\{{[^}}]*\b{re.escape(export)}\b")
+        if not any(re.search(p, src, re.S) for p in patterns):
+            problems.append(f"module {module!r} does not export {export!r}")
+        info["module_bytes"] = len(mod.read_bytes())
+
+    if not (repo / "node_modules").exists():
+        problems.append("node_modules is absent — install the project's reviewed dependencies first, "
+                        "or pass --node-modules to reuse an existing installation")
+
+    info["supported"] = not problems
+    info["problems"] = problems
+    return info
+
+
+def clone_isolated(src_repo: Path, work: Path, node_modules: Path | None = None) -> Path:
+    """Create a DISPOSABLE isolated working copy of a real developer repository.
+
+    The developer's original source tree is never modified: a full local clone carries the Git
+    history and working tree, and dependencies are shared read-only by symlink. All agent edits,
+    commits and verification happen inside the clone.
+    """
+    src_repo = Path(src_repo).resolve()
+    dest = Path(work) / f"real-{uuid.uuid4().hex[:8]}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", str(src_repo), str(dest)],
+                   check=True, capture_output=True)
+    nm_src = Path(node_modules) if node_modules else (src_repo / "node_modules")
+    if nm_src.exists() and not (dest / "node_modules").exists():
+        (dest / "node_modules").symlink_to(nm_src, target_is_directory=True)
+    return dest
+
+
+def run_ordinary_tests(repo: Path, timeout: int = 300) -> dict[str, Any]:
+    """Run the project's OWN ordinary test suite — never a ShipGuard-invented one.
+
+    Prefers the package's declared ``test`` script (so a real repository's existing tests and
+    history are preserved and used as-is); falls back to a local vitest binary.
+    """
+    repo = Path(repo)
+    cmd: list[str] | None = None
+    runner = "none"
+    pkg = repo / "package.json"
+    if pkg.exists():
+        try:
+            script = (json.loads(pkg.read_text()).get("scripts") or {}).get("test")
+        except Exception:  # noqa: BLE001
+            script = None
+        if script and shutil.which("npm"):
+            cmd, runner = ["npm", "test"], "npm-test"
+    if cmd is None:
+        vitest = repo / "node_modules" / ".bin" / "vitest"
+        if vitest.exists():
+            cmd, runner = [str(vitest), "run"], "vitest"
+    if cmd is None:
+        return {"ran": False, "passed": None, "runner": "none",
+                "summary": "no `test` script and vitest not available (node_modules missing?)"}
     try:
-        p = subprocess.run([str(vitest), "run"], cwd=str(repo), capture_output=True, text=True, timeout=120)
+        p = subprocess.run(cmd, cwd=str(repo), capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return {"ran": True, "passed": None, "summary": "ordinary tests timed out"}
+        return {"ran": True, "passed": None, "runner": runner,
+                "summary": f"ordinary tests timed out after {timeout}s"}
     out = p.stdout + p.stderr
-    line = next((l.strip() for l in out.splitlines() if "Tests " in l), "")
-    return {"ran": True, "passed": p.returncode == 0, "summary": line or f"exit {p.returncode}"}
+    line = next((l.strip() for l in out.splitlines() if "Tests " in l or "test files" in l), "")
+    return {"ran": True, "passed": p.returncode == 0, "runner": runner,
+            "summary": (line or f"exit {p.returncode}")[:200]}
 
 
 def run_sentinel_challenge(sentinel_cli, repo: Path, approved_contract: Path, store: Path,
@@ -221,7 +340,7 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
              baseline: str = "HEAD", runner: str = "local", evidence_dir: Path | None = None,
              target_file: str = MODULE, export: str = EXPORT, baseline_fixture: str = "baseline-buggy.ts",
              test_src: str = "target-settlement/src/settle.test.ts",
-             test_dest: str = "src/settle.test.ts") -> RunRecord:
+             test_dest: str = "src/settle.test.ts", source_repo: Path | None = None) -> RunRecord:
     work = Path(work); work.mkdir(parents=True, exist_ok=True)
     # The approved Sentinel acceptance contract is HELD OUT from the agent (lives in the package /
     # a verifier dir, never inside the candidate repo) and is not generated from the agent's output.
@@ -239,6 +358,18 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
         rec.states.append(state)
         rec.transitions.append(Transition(_now(), state, detail))
 
+    def finish() -> RunRecord:
+        """Persist the record. In real-repository mode, PROVE the developer's tree is untouched."""
+        if source_repo is not None and rec.source_fingerprint_before is not None:
+            after = repo_fingerprint(Path(source_repo))
+            rec.source_fingerprint_after = after
+            rec.original_untouched = (after == rec.source_fingerprint_before)
+            go("ORIGINAL_TREE_CHECK", untouched=rec.original_untouched,
+               before=rec.source_fingerprint_before, after=after,
+               note="the developer's repository was cloned into a disposable worktree, never edited in place")
+        _write(rec)
+        return rec
+
     go("INTENT", task=task)
     go("APPROVED_CONTRACT", contract=str(approved_contract), digest=contract_digest,
        verifier="sentinel", allowed_paths=allowed_paths,
@@ -248,16 +379,36 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
     if not usable:
         go("ENVIRONMENT_FAILURE", agent=adapter.name, reason=reason)
         rec.final_status = "environment_failure"
-        _write(rec); return rec
+        return finish()
     if sentinel_cli is None:
         go("ENVIRONMENT_FAILURE", reason="sentinel CLI not available — cannot independently verify")
         rec.final_status = "environment_failure"
-        _write(rec); return rec
+        return finish()
 
-    repo = setup_repo(work, node_modules, baseline=baseline_fixture, module=target_file,
-                      test_src=test_src, test_dest=test_dest)
-    rec.git_head = git_head(repo)
-    go("BASELINE", repo=str(repo), git_head=rec.git_head, note=f"buggy baseline ({baseline_fixture}); weak ordinary tests")
+    if source_repo is not None:
+        # PHASE 2 — a real developer repository, worked on inside a disposable isolated clone.
+        insp = inspect_project(Path(source_repo), target_file, export)
+        go("PROJECT_INSPECTION", supported=insp["supported"], problems=insp["problems"],
+           package_name=insp.get("package_name"), package_type=insp.get("package_type"),
+           test_script=insp.get("test_script"), module=target_file, export=export,
+           note="the original repository was only read, never modified")
+        if not insp["supported"]:
+            go("UNSUPPORTED_PROJECT", problems=insp["problems"],
+               note="rejected clearly rather than verifying an unsupported project inaccurately")
+            rec.final_status = "environment_failure"
+            return finish()
+        rec.source_fingerprint_before = repo_fingerprint(Path(source_repo))
+        repo = clone_isolated(Path(source_repo), work, node_modules)
+        rec.git_head = git_head(repo)
+        go("BASELINE", mode="real-repository-isolated-clone", git_head=rec.git_head,
+           source_fingerprint=rec.source_fingerprint_before,
+           note="disposable clone; the developer's working tree and Git history are preserved")
+    else:
+        repo = setup_repo(work, node_modules, baseline=baseline_fixture, module=target_file,
+                          test_src=test_src, test_dest=test_dest)
+        rec.git_head = git_head(repo)
+        go("BASELINE", mode="synthetic-fixture", git_head=rec.git_head,
+           note=f"buggy baseline ({baseline_fixture}); weak ordinary tests")
     go("CODEBASE_MODEL", **_model_codebase(repo, target_file, export))
 
     cx = None
@@ -272,7 +423,7 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
         if res.outcome in ("unavailable", "interrupted"):
             rec.final_status = "interrupted" if res.outcome == "interrupted" else "environment_failure"
             rec.attempts.append({"attempt": attempt, "agent": asdict(res), "status": rec.final_status})
-            _write(rec); return rec
+            return finish()
         if res.outcome == "failed" or not res.made_change:
             # Distinct from "contradicted": the agent produced NO change (it may have asked for
             # clarification or declined). Honest status — not an independent contradiction.
@@ -280,13 +431,13 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
             rec.final_status = "no_change"
             go("REVERIFICATION", attempt=attempt, verdict="NO_CHANGE",
                note="agent made no change (possibly awaiting clarification); nothing independently verified")
-            _write(rec); return rec
+            return finish()
 
         # Integrity guard: the agent must not have tampered with the held-out acceptance contract.
         if sha256_hex(approved_contract.read_bytes()) != contract_digest:
             go("TAMPER", note="approved contract digest changed during run — aborting; the agent cannot redefine acceptance")
             rec.final_status = "review_required"
-            _write(rec); return rec
+            return finish()
 
         # Phase 1.5 — validate the ACTUAL diff against the approved change scope. A prompt telling
         # the agent not to touch tests is not a control; out-of-scope edits, test modifications and
@@ -300,7 +451,7 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
             go("REVERIFICATION", attempt=attempt, verdict="REVIEW REQUIRED", scope=scope,
                note=("change touches tests, dependencies or unauthorised paths; accepting it "
                      "automatically would let the agent redefine its own acceptance"))
-            _write(rec); return rec
+            return finish()
 
         tests = run_ordinary_tests(repo)
         go("ORDINARY_TESTS", attempt=attempt, **tests)
@@ -341,7 +492,7 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
                 rec.final_status = "review_required"
                 go("REVERIFICATION", attempt=attempt, verdict="REVIEW REQUIRED", tree_binding=binding,
                    note="committed tree is not byte-identical to the verified candidate; refusing to claim verification")
-                _write(rec); return rec
+                return finish()
             rec.git_head = new_head
             rec.tree_binding = binding
             rec.disclosure = challenge.get("disclosure")
@@ -354,12 +505,12 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
                note="committed tree proven byte-identical to the verified candidate snapshot")
             rec.final_status = "verified"
             rec.final_counterexample = None
-            _write(rec); return rec
+            return finish()
 
         if verdict == "ENVIRONMENT_FAILURE":
             go("ENVIRONMENT_FAILURE", attempt=attempt, reasons=challenge.get("reasons"))
             rec.final_status = "environment_failure"
-            _write(rec); return rec
+            return finish()
 
         if verdict == "REVIEW REQUIRED":
             rec.final_status = "review_required"
@@ -367,7 +518,7 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
             go("REVERIFICATION", attempt=attempt, verdict="REVIEW REQUIRED",
                reasons=challenge.get("reasons"),
                note="Sentinel requires human judgement; not auto-accepted and not a detected defect")
-            _write(rec); return rec
+            return finish()
 
         if verdict != "CONTRADICTED":
             # UNVERIFIED, an unknown status, or an evidence-integrity failure: insufficient evidence.
@@ -376,7 +527,7 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
             rec.final_counterexample = cx
             go("REVERIFICATION", attempt=attempt, verdict=verdict, reasons=challenge.get("reasons"),
                note="evidence insufficient or an integrity check failed; not accepted, not a contradiction")
-            _write(rec); return rec
+            return finish()
 
         # CONTRADICTED: record the counterexample; the loop repairs if attempts remain.
         go("COUNTEREXAMPLE", attempt=attempt, counterexample=cx,
@@ -386,8 +537,7 @@ def run_task(*, task: str, adapter, work: Path, sentinel_cli=None, approved_cont
 
     rec.final_status = "contradicted"  # repair attempts exhausted; defect remains visible
     go("REVERIFICATION", verdict="CONTRADICTED", note="bounded attempts exhausted; defect NOT repaired")
-    _write(rec)
-    return rec
+    return finish()
 
 
 def _portable(s: str) -> str:
