@@ -1013,6 +1013,8 @@ def run(agent_timeout: int = 420, only: list[str] | None = None,
               flush=True)
 
     tasks = [t for t in TASKS if not only or t["id"] in only]
+    if not tasks:
+        raise SystemExit(f"no corpus task matched {only!r} — refusing to report an empty benchmark")
 
     results: list[dict] = []
     started = _now()
@@ -1349,8 +1351,14 @@ def report() -> str:
 
 
 if __name__ == "__main__":
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "validate"
-    rest = [a for a in sys.argv[2:] if not a.startswith("-")]
+    argv = sys.argv[1:]
+    cmd = argv[0] if argv else "validate"
+    agent = "codex"
+    if "--agent" in argv:                       # consume the flag AND its value before filtering
+        i = argv.index("--agent")
+        agent = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
+    rest = [a for a in argv[1:] if not a.startswith("-")]
     if cmd == "validate":
         w = Path("/tmp/sg-bench-validate")
         shutil.rmtree(w, ignore_errors=True)
@@ -1366,9 +1374,6 @@ if __name__ == "__main__":
     elif cmd == "freeze":
         freeze()
     elif cmd == "run":
-        agent = "codex"
-        if "--agent" in sys.argv:
-            agent = sys.argv[sys.argv.index("--agent") + 1]
         arms = tuple(a.upper() for a in rest if a.upper() in ("AB", "C")) or ("AB", "C")
         only = [a for a in rest if a.upper() not in ("AB", "C")] or None
         out = run(only=only, arms=arms, agent=agent)
