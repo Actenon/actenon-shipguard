@@ -1033,7 +1033,6 @@ def report() -> str:
     ab = [r for r in results if r.get("arm") == "AB"]
     c = [r for r in results if r.get("arm") == "C"]
     sp = manifest["selection_process"]
-    tasks_by_id = {t["id"]: t for t in manifest["tasks"]}
     L: list[str] = []
     a = L.append
 
