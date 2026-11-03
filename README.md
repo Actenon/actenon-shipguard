@@ -60,36 +60,47 @@ PASS output for a v1.0 security guarantee.
 
 ---
 
-## New in this branch: the Behavioural Discovery Engine (experimental)
+## Behavioural Discovery Engine — experimental, independently evaluated status pending
 
-`bde-discovery-v0.3.0` adds the subsystem this product was missing: **discovering justified
-behavioural expectations in existing software and trying to falsify the implementation
-against them** — without anyone hand-authoring the acceptance test that reveals the bug.
+BDE extracts checkable examples and candidate properties from JS/TS source,
+documentation and existing tests, then reports counterexamples with provenance.
 
 ```bash
-shipguard discover --module src/index.ts --allow-local   # laws from docs/signatures/tests, then falsify
-shipguard check --base origin/main --allow-local         # change-scoped + regression backbone
-shipguard explain <finding-id>                           # full provenance of a finding
-shipguard reproduce <finding-id>                         # re-execute the witness in a fresh clone
-shipguard repair <finding-id> --agent codex              # optional, independently re-verified
+shipguard discover --module src/index.ts --allow-local
+shipguard check --base origin/main --allow-local
+shipguard explain <finding-id>
+shipguard reproduce <finding-id> --allow-local
+shipguard repair <finding-id> --agent codex --contract /external/approved-contract.json
 ```
 
-Every law carries provenance (file, lines, sha256, git revision) and an evidence class
-(A authoritative / B independently grounded / C preservation / D inferred); only A/B can
-block, and a D law is promoted only by recorded, deterministic qualification rules — the
-engine never certifies its own invention. The developer's tree is only read (fingerprinted
-before/after); execution happens in a disposable clone behind explicit `--allow-local`
-consent (advisory isolation, like Sentinel's local runner).
+Local execution requires explicit consent and trusts the code to run as your OS
+user. For untrusted code, use the digest-pinned Docker option described in
+[the containment guide](docs/BDE-CONTAINMENT.md). Neither option turns target
+observations into an independent semantic oracle.
 
-**Measured on the frozen 6-defect corpus (blind — no acceptance tests supplied):** 3/6
-historical defects discovered with minimal reproducible witnesses, 0 invalid-law false
-positives, plus 24 audited-true documentation-code contradictions in ufo itself. Mutation
-sensitivity on known-valid code: 38.9% of single-token semantic mutations detected, 0 false
-positives on harmless refactors. All misses are published with causes. See
-[`benchmarks/bde/report.md`](benchmarks/bde/report.md) and
-[`BDE-RELEASE-EVIDENCE.md`](BDE-RELEASE-EVIDENCE.md). This is an experimental preview:
-discovery is evidence-bounded — where a repository states no machine-extractable behaviour,
-BDE finds nothing and says so.
+Each law records source identity, grounding and evidence class. Explicit documented
+literal results can establish a documentation/code contradiction; deciding which
+side should change requires review. Signature and splitter inferences remain
+unapproved hypotheses. BDE cannot approve its own repair contract or execution gate.
+
+The original **3/6** result is rediscovery on known development targets without
+passing acceptance tests to the discovery function. It is **not an independent
+unseen evaluation**. The 24 documentation finding rows represent six unique
+export/input pairs in three export families, with duplicate provenance. There were
+27 residual finding rows at repair revisions. False-positive rate and semantic
+mutation adequacy are **NOT ESTABLISHED**; 14/36 is only the measured response to
+the original harness's importable token substitutions. See the
+[scientific audit](docs/BDE-SCIENTIFIC-AUDIT.md) for exact accounting and demonstrated
+authority defects corrected before the next freeze.
+
+The worker-loading and Python syntax-guard failures are repaired. The frozen
+engine `137a680` passed all six jobs in
+[run 41708530409](https://github.com/Actenon/actenon-shipguard/actions/runs/41708530409),
+including Python 3.11/3.12 × Node 20/22, CLI/wheel discovery, Sentinel and Docker
+negative probes. The [preregistered protocol](docs/BDE-HOLDOUT-PROTOCOL.md) and
+[freeze record](evidence/prefreeze/engine-freeze.json) precede selection of new targets.
+Incremental Codex value and the new-project repair journey remain **NOT ESTABLISHED**
+until that evaluation finishes. Do not merge or release this draft on these checks alone.
 
 ## What it does (today, in this pre-release)
 

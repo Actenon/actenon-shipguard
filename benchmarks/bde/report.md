@@ -1,3 +1,13 @@
+> **Historical development evidence; superseded scientific interpretation.**
+> This report describes the original engine and known development corpus. The
+> discovery call was not given acceptance tests, but engine development was not
+> blind to these target defects. Claims of an independent holdout, zero invalid-law
+> false positives, clean fix controls or validated semantic mutation sensitivity
+> are not established by these results. The 24 documentation rows are six unique
+> export/input pairs; repair revisions contain 27 finding rows. See
+> [the scientific audit](../../docs/BDE-SCIENTIFIC-AUDIT.md) for accounting, counterexamples and pre-freeze repairs.
+> No results below have been silently rescored or rewritten as unseen evidence.
+
 # BDE Research Benchmark Report
 
 **Engine:** Actenon Behavioural Discovery Engine (intent-compiler/1, runner predicates v1) — commit `e9abf91`+ (see `results.json: engine_commit`).
