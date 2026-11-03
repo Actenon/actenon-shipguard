@@ -1,0 +1,8 @@
+{
+  "engine_evaluated_blind": "137a68005dc85c765fbd02280268f539a6131001",
+  "this_revision": "post-freeze safety revision; not blind-evaluated",
+  "source": "synthetic pre-holdout README symlink control",
+  "changes": "default host-intake refusal, bounded no-follow collector reads and safe dirty overlay",
+  "validation_note": "Four core matrix jobs173 tests before final end-to-end canary addition; all11 intake controls pass on Python3.11 and3.12;8 real Sentinel tests; clean installed-wheel Docker discovery/reproduction/refusals/demo",
+  "limitation": "Trusted repository tree and Git configuration required; arbitrary hostile intake unsupported. Docker target execution containment is a separate boundary."
+}

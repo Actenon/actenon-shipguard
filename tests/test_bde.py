@@ -323,7 +323,8 @@ def test_check_mode_reports_regression_for_an_uncommitted_change(defect_repo, tm
 def test_consent_gate_blocks_execution_without_allow_local(defect_repo, tmp_path):
     from actenon_shipguard.bde.check import run_bde
     result = run_bde(defect_repo, module="src/index.ts", out_dir=tmp_path / "out",
-                     tsx_path=str(TSX), allow_local=False, work_dir=tmp_path / "work")
+                     tsx_path=str(TSX), allow_local=False, allow_host_intake=True,
+                     work_dir=tmp_path / "work")
     assert result.overall_status == "INSUFFICIENT_EVIDENCE"
     assert result.executed == 0 and result.not_run > 0
     assert "consent" in json.dumps(result.not_checked)

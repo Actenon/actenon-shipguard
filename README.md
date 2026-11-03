@@ -73,6 +73,12 @@ shipguard reproduce <finding-id> --allow-local
 shipguard repair <finding-id> --agent codex --contract /external/approved-contract.json
 ```
 
+Docker contains target execution; host Git and repository intake remain trusted.
+With `--runner docker`, explicitly pass `--allow-host-intake` only for a reviewed
+tree and trusted Git configuration. Arbitrary hostile-repository intake is
+unsupported and refused by default. See [the execution boundary](docs/BDE-CONTAINMENT.md).
+
+
 Local execution requires explicit consent and trusts the code to run as your OS
 user. For untrusted code, use the digest-pinned Docker option described in
 [the containment guide](docs/BDE-CONTAINMENT.md). Neither option turns target

@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .intake import read_evidence
+
 
 # -------------------------------------------------------------------------------------------- #
 # Safe literal parser (JSON-superset, no evaluation)
@@ -885,7 +887,7 @@ def find_test_files(repo: Path, module: str, *, package_name: str = "",
                 try:
                     if p.stat().st_size > 262_144:
                         continue
-                    text = p.read_text(errors="replace")
+                    text = read_evidence(repo, p.relative_to(repo))
                 except OSError:
                     continue
                 if any(re.search(rf"\b{re.escape(e)}\s*\(", text) for e in export_names):
@@ -904,30 +906,29 @@ def _jsdoc_strip(text: str) -> str:
 def collect(repo: Path, module: str, revision: str, *, exports_of_interest: list[str] | None = None) -> EvidenceBundle:
     """Collect the grounded evidence for one module of a repository."""
     repo = Path(repo)
-    mod_path = repo / module
-    text = mod_path.read_text(errors="replace")
+    text = read_evidence(repo, module)
     bundle = EvidenceBundle(repo=repo, module=module, revision=revision, module_text=text,
                             module_sha256=_sha256(text))
     bundle.signatures = extract_signatures(text)
     exports = exports_of_interest or [s.export for s in bundle.signatures]
 
     pkg_path = repo / "package.json"
-    if pkg_path.exists():
+    if pkg_path.exists() or pkg_path.is_symlink():
         import json
         try:
-            bundle.package = json.loads(pkg_path.read_text())
-        except Exception:  # noqa: BLE001
+            bundle.package = json.loads(read_evidence(repo, "package.json"))
+        except json.JSONDecodeError:
             bundle.notes.append("package.json is not valid JSON")
     pkg_name = str(bundle.package.get("name") or "")
     qualifiers = tuple(q for q in (pkg_name, pkg_name.split("/")[-1] if "/" in pkg_name else "") if q)
 
     readme = None
     for cand in ("README.md", "readme.md", "Readme.md", "README.MD"):
-        if (repo / cand).exists():
+        if (repo / cand).exists() or (repo / cand).is_symlink():
             readme = repo / cand
             break
     if readme is not None:
-        rtext = readme.read_text(errors="replace")
+        rtext = read_evidence(repo, readme.relative_to(repo))
         bundle.readme_file = readme.name
         bundle.readme_sha256 = _sha256(rtext)
         bundle.readme_sections = extract_readme_sections(rtext, exports)
@@ -952,7 +953,7 @@ def collect(repo: Path, module: str, revision: str, *, exports_of_interest: list
 
     for tf in find_test_files(repo, module, package_name=pkg_name,
                               export_names=[s.export for s in bundle.signatures]):
-        ttext = tf.read_text(errors="replace")
+        ttext = read_evidence(repo, tf.relative_to(repo))
         rel = str(tf.relative_to(repo))
         bundle.test_files[rel] = _sha256(ttext)
         for export in exports:

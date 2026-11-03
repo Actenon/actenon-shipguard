@@ -1,0 +1,35 @@
+{
+  "wheel_sha256": "b2033bc5169a4c6df28f3ac5537c1a50b92c49c423266643ff8fd7d4fa414b6c",
+  "checks": [
+    {
+      "name": "docker-intake-refused",
+      "exit": 2
+    },
+    {
+      "name": "wheel-docker-discover",
+      "exit": 1
+    },
+    {
+      "name": "docker-reproduction-refused",
+      "exit": 2
+    },
+    {
+      "name": "wheel-docker-reproduce",
+      "exit": 0
+    },
+    {
+      "name": "wheel-demo",
+      "exit": 0
+    }
+  ],
+  "actual_bde_summary": {
+    "laws_discovered": 4,
+    "laws_blocking": 2,
+    "laws_executed": 3,
+    "laws_passed": 0,
+    "laws_failed": 3,
+    "laws_errored": 0,
+    "laws_skipped": 1,
+    "overall_status": "CONFIRMED_CONTRADICTION"
+  }
+}

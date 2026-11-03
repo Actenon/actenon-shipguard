@@ -8,9 +8,10 @@ CONTRACT (mandate §8):
     equality proof is recorded on the result.
   * Executing laws means running the project's own module code in a local subprocess.
     That is ADVISORY isolation (same OS user), exactly like Sentinel's ``local`` runner —
-    stated, never overstated. When the caller has not consented (``--allow-local`` or
-    ``SHIPGUARD_ALLOW_LOCAL``), laws are compiled and classified but NOT executed, and the
-    result is INSUFFICIENT_EVIDENCE with an explicit consent note.
+    stated, never overstated. Host repository intake requires explicit trust before Git
+    or collection. ``--allow-host-intake`` permits compilation only; local execution
+    additionally requires ``--allow-local`` or ``SHIPGUARD_ALLOW_LOCAL``. Local-execution
+    consent also covers host intake. Docker never implies that host intake is safe.
   * The final statuses are the durable set from mandate §9, mapped onto (never silently
     replacing) the existing ShipGuard/Sentinel vocabulary.
 """
@@ -18,7 +19,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -166,7 +166,8 @@ def run_bde(source_repo: Path, *, module: str | None = None, export: str | None 
             base: str | None = None, out_dir: Path, tsx_path: str | None = None,
             allow_local: bool = False, policy: Policy | None = None,
             work_dir: Path | None = None, include_preservation: bool | None = None,
-            runner: str = "local", image: str | None = None) -> BDEResult:
+            runner: str = "local", image: str | None = None,
+            allow_host_intake: bool = False) -> BDEResult:
     """The single implementation behind ``shipguard discover`` and ``shipguard check``.
 
     ``base=None`` (discover): the whole module is the investigation target.
@@ -191,6 +192,24 @@ def run_bde(source_repo: Path, *, module: str | None = None, export: str | None 
         "unusual syntax may be skipped (skips are reported, never guessed)",
     ]
 
+    # Docker contains target execution, not the host's Git/configuration or collector.
+    # Refuse before any Git command or target-file read unless that intake is trusted.
+    if not (allow_host_intake or (runner == "local" and _consented(allow_local))):
+        result.overall_status = STATUS_ENV_FAILURE
+        result.notes.append("host repository intake requires explicit consent: use --allow-host-intake "
+                            "only for a reviewed tree and trusted Git configuration; arbitrary hostile "
+                            "repository intake is unsupported, including with Docker")
+        result.not_checked.append({"reason": "host intake consent missing", "laws": 0})
+        return result
+    from .intake import IntakeRefused, copy_tracked_overlay, relative_parts
+    try:
+        if module is not None:
+            relative_parts(module)
+    except IntakeRefused as exc:
+        result.overall_status = STATUS_ENV_FAILURE
+        result.notes.append(str(exc))
+        return result
+
     if not (source_repo / ".git").exists():
         result.notes.append("not a git repository — evidence binding requires Git history")
         result.overall_status = STATUS_ENV_FAILURE
@@ -210,12 +229,14 @@ def run_bde(source_repo: Path, *, module: str | None = None, export: str | None 
     modified = [ln[3:] for ln in dirty if ln.startswith(" M") or ln.startswith("M ")]
     untracked = [ln[3:] for ln in dirty if ln.startswith("??")]
     if modified:
-        for rel in modified:
-            src_file = source_repo / rel
-            if src_file.is_file():
-                dst = clone / rel
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_file, dst)
+        try:
+            for rel in modified:
+                copy_tracked_overlay(source_repo, clone, rel)
+        except (IntakeRefused, OSError) as exc:
+            result.overall_status = STATUS_ENV_FAILURE
+            result.notes.append(f"tracked overlay intake refused: {exc}")
+            _finish(result, source_repo, fingerprint_before, started)
+            return result
         result.notes.append(f"{len(modified)} uncommitted tracked modification(s) carried into "
                             f"the disposable clone for verification")
     if untracked:
@@ -251,7 +272,13 @@ def run_bde(source_repo: Path, *, module: str | None = None, export: str | None 
     else:
         exports_of_interest = [export] if export else None
 
-    bundle = collect(clone, module, result.revision, exports_of_interest=exports_of_interest)
+    try:
+        bundle = collect(clone, module, result.revision, exports_of_interest=exports_of_interest)
+    except IntakeRefused as exc:
+        result.overall_status = STATUS_ENV_FAILURE
+        result.notes.append(f"repository evidence intake refused: {exc}")
+        _finish(result, source_repo, fingerprint_before, started)
+        return result
     if include_preservation is None:
         include_preservation = bool(base)      # check mode: preservation is the regression backbone
     laws = compile_laws(bundle, exports_of_interest=exports_of_interest,

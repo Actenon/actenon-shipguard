@@ -333,7 +333,8 @@ def cmd_discover(args) -> int:
     repo = Path(args.repo).resolve() if args.repo else Path.cwd()
     out = Path(args.out)
     result = run_bde(repo, module=args.module, export=args.export, base=None, out_dir=out,
-                     tsx_path=args.tsx, allow_local=args.allow_local, runner=args.runner, image=args.image)
+                     tsx_path=args.tsx, allow_local=args.allow_local, runner=args.runner, image=args.image,
+                     allow_host_intake=args.allow_host_intake)
     print(terminal_summary(result))
     paths = write_reports(result, out)
     print(f"\n  reports    : {paths['html']}  (+ {paths['json'].name}, {paths['summary'].name})")
@@ -348,7 +349,8 @@ def cmd_check(args) -> int:
     repo = Path(args.repo).resolve() if args.repo else Path.cwd()
     out = Path(args.out)
     result = run_bde(repo, module=args.module, export=args.export, base=args.base, out_dir=out,
-                     tsx_path=args.tsx, allow_local=args.allow_local, runner=args.runner, image=args.image)
+                     tsx_path=args.tsx, allow_local=args.allow_local, runner=args.runner, image=args.image,
+                     allow_host_intake=args.allow_host_intake)
     print(terminal_summary(result))
     paths = write_reports(result, out)
     print(f"\n  reports    : {paths['html']}  (+ {paths['json'].name}, {paths['summary'].name})")
@@ -399,6 +401,11 @@ def cmd_reproduce(args) -> int:
     if getattr(args, "runner", "local") == "local" and not _consented(getattr(args, "allow_local", False)):
         print("ERROR: reproduction executes repository code; explicitly use --allow-local "
               "for trusted code only (advisory isolation).", file=sys.stderr)
+        return 2
+    if getattr(args, "runner", "local") == "docker" and not getattr(args, "allow_host_intake", False):
+        print("ERROR: Docker contains target execution, not host repository intake. "
+              "Use --allow-host-intake only for a reviewed tree and trusted Git configuration; "
+              "arbitrary hostile repository intake is unsupported.", file=sys.stderr)
         return 2
     ev = _load_evidence(args.evidence)
     f = next((x for x in ev.get("findings", []) if x.get("finding_id") == args.finding_id), None)
@@ -572,7 +579,10 @@ def main(argv=None) -> int:
     p.add_argument("--tsx", default=None, help="path to tsx (or set SHIPGUARD_TSX)")
     p.add_argument("--allow-local", action="store_true",
                    help="CONSENT: execute the repo's own module code locally (advisory isolation) to "
-                        "falsify laws. Without it, laws are compiled and classified but not executed.")
+                        "falsify laws, including trusted host repository intake.")
+    p.add_argument("--allow-host-intake", action="store_true",
+                   help="CONSENT: read a reviewed repository with trusted Git configuration on the host; "
+                        "required with Docker. Arbitrary hostile repository intake is unsupported.")
     p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_discover)
 
     p.add_argument("--runner", choices=["local", "docker"], default="local", help="local requires consent; docker requires a pinned image")
@@ -587,6 +597,8 @@ def main(argv=None) -> int:
     p.add_argument("--tsx", default=None, help="path to tsx (or set SHIPGUARD_TSX)")
     p.add_argument("--allow-local", action="store_true",
                    help="CONSENT: execute the repo's own module code locally (advisory isolation)")
+    p.add_argument("--allow-host-intake", action="store_true",
+                   help="CONSENT: host intake of a reviewed tree and trusted Git configuration; required with Docker")
     p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_check)
 
     p.add_argument("--runner", choices=["local", "docker"], default="local", help="local requires consent; docker requires a pinned image")
@@ -603,6 +615,8 @@ def main(argv=None) -> int:
     p.add_argument("--repo", default=None, help="repository (default: current directory; read-only)")
     p.add_argument("--tsx", default=None, help="path to tsx (or set SHIPGUARD_TSX)")
     p.add_argument("--allow-local", action="store_true", help="explicit consent for trusted local repository execution")
+    p.add_argument("--allow-host-intake", action="store_true",
+                   help="CONSENT: host intake of a reviewed tree and trusted Git configuration; required with Docker")
     p.set_defaults(fn=cmd_reproduce)
 
     p.add_argument("--runner", choices=["local", "docker"], default="local", help="local requires consent; docker requires a pinned image")
