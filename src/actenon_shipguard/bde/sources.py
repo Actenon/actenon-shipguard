@@ -113,27 +113,32 @@ class _Lit:
                 simple = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", "0": "\0",
                           "\\": "\\", "'": "'", '"': '"', "`": "`", "/": "/"}
                 if e in simple:
-                    out.append(simple[e]); self.i += 1
+                    out.append(simple[e])
+                    self.i += 1
                 elif e == "u":
                     hex4 = self.t[self.i + 1:self.i + 5]
                     if len(hex4) == 4 and all(h in "0123456789abcdefABCDEF" for h in hex4):
-                        out.append(chr(int(hex4, 16))); self.i += 5
+                        out.append(chr(int(hex4, 16)))
+                        self.i += 5
                     else:
                         raise LiteralError("bad \\u escape")
                 elif e == "x":
                     hex2 = self.t[self.i + 1:self.i + 3]
                     if len(hex2) == 2 and all(h in "0123456789abcdefABCDEF" for h in hex2):
-                        out.append(chr(int(hex2, 16))); self.i += 3
+                        out.append(chr(int(hex2, 16)))
+                        self.i += 3
                     else:
                         raise LiteralError("bad \\x escape")
                 elif e == "\n":                       # line continuation
                     self.i += 1
                 else:
-                    out.append(e); self.i += 1
+                    out.append(e)
+                    self.i += 1
             elif c == "$" and self.i + 1 < len(self.t) and self.t[self.i + 1] == "{":
                 raise LiteralError("template interpolation is not a literal")
             else:
-                out.append(c); self.i += 1
+                out.append(c)
+                self.i += 1
         raise LiteralError("unterminated string")
 
     def _number(self) -> float | int:

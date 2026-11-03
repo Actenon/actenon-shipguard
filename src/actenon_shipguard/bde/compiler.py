@@ -27,11 +27,10 @@ PROPOSE laws but never CERTIFY them (mandate §4.1, §5, §15).
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
-from .laws import (BehaviouralLaw, CLASS_B, CLASS_C, CLASS_D, UNAPPROVED)
-from .sources import EvidenceBundle, Signature, parse_literal, LiteralError
+from .laws import CLASS_B, CLASS_C, CLASS_D, BehaviouralLaw
+from .sources import EvidenceBundle, LiteralError, Signature, parse_literal
 
 # -------------------------------------------------------------------------------------------- #
 # Reviewed documentation templates (verbatim-structure matches; prose is stored, not guessed)

@@ -7,20 +7,36 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from actenon_shipguard.bde.authority import Policy, annotate_section_arity, qualify
 from actenon_shipguard.bde.compiler import compile_laws
-from actenon_shipguard.bde.laws import (CLASS_A, CLASS_B, CLASS_C, CLASS_D, APPROVED, QUALIFIED,
-                                        UNAPPROVED, BehaviouralLaw, Grounding, validate_lawpack,
-                                        lawpack_for)
-from actenon_shipguard.bde.sources import (LiteralError, collect, extract_doc_examples,
-                                           extract_each_tables, extract_object_tables,
-                                           extract_readme_sections, extract_signatures,
-                                           extract_test_pairs, parse_call, parse_literal)
+from actenon_shipguard.bde.laws import (
+    APPROVED,
+    CLASS_A,
+    CLASS_B,
+    CLASS_C,
+    CLASS_D,
+    QUALIFIED,
+    UNAPPROVED,
+    BehaviouralLaw,
+    Grounding,
+    lawpack_for,
+    validate_lawpack,
+)
+from actenon_shipguard.bde.sources import (
+    LiteralError,
+    collect,
+    extract_doc_examples,
+    extract_each_tables,
+    extract_object_tables,
+    extract_readme_sections,
+    extract_signatures,
+    parse_call,
+    parse_literal,
+)
 
 # ---------------------------------------------------------------------------------------------- #
 # fixtures
@@ -31,7 +47,8 @@ PKG = Path(__file__).resolve().parent.parent / "src" / "actenon_shipguard"
 def _find_tsx() -> Path | None:
     import os
     env = os.environ.get("SHIPGUARD_TSX")
-    cands = ([Path(env)] if env else []) + [
+    which = shutil.which("tsx")
+    cands = ([Path(env)] if env else []) + ([Path(which)] if which else []) + [
         Path(__file__).resolve().parents[3] / "sentinel-verified" / "node_modules" / ".bin" / "tsx",
         Path(__file__).resolve().parents[2] / "sentinel-verified" / "node_modules" / ".bin" / "tsx",
         Path("/tmp/sentinel-verified/node_modules/.bin/tsx")]
@@ -235,7 +252,7 @@ def test_only_qualified_laws_block():
 
 def test_class_a_requires_real_approval():
     a_law = _law(evidence_class=CLASS_A)
-    rep = qualify([a_law], Policy())
+    qualify([a_law], Policy())
     assert not a_law.is_blocking and a_law.approval == UNAPPROVED   # compiled laws never arrive approved
 
 
@@ -248,21 +265,21 @@ def test_discover_finds_the_defect_end_to_end(defect_repo, tmp_path):
     b = collect(defect_repo, "src/index.ts", "HEAD")
     laws = compile_laws(b, include_preservation=False)
     annotate_section_arity(laws, b)
-    report = qualify(laws, Policy())
-    assert any(l.kind == "split_boundary" and l.is_blocking for l in laws)
+    qualify(laws, Policy())
+    assert any(lw.kind == "split_boundary" and lw.is_blocking for lw in laws)
     pack, problems = build_lawpack(laws, "src/index.ts", "HEAD", defect_repo)
     assert pack is not None, problems
-    meta = {l.law_id: l for l in laws}
+    meta = {lw.law_id: lw for lw in laws}
     ex = run_lawpack(pack, defect_repo, TSX, laws_meta=meta, mode="discover")
     assert ex.failed >= 1, "the digit/caseless-boundary defect must be falsified"
     found = [(f["law"]["kind"], str(f.get("args"))) for f in ex.findings]
     assert any("split_boundary" in k for k, _ in found)
     # preservation pairs (the project's own tests) must all PASS on the baseline
     laws_p = compile_laws(b, include_preservation=True)
-    pack_p, _ = build_lawpack([l for l in laws_p if l.evidence_class == CLASS_C],
+    pack_p, _ = build_lawpack([lw for lw in laws_p if lw.evidence_class == CLASS_C],
                               "src/index.ts", "HEAD", defect_repo)
     if pack_p and pack_p["laws"]:
-        ex_p = run_lawpack(pack_p, defect_repo, TSX, laws_meta={l.law_id: l for l in laws_p})
+        ex_p = run_lawpack(pack_p, defect_repo, TSX, laws_meta={lw.law_id: lw for lw in laws_p})
         assert ex_p.failed == 0
 
 
@@ -345,8 +362,8 @@ def test_prompt_injection_cannot_promote_laws(defect_repo, tmp_path):
         assert law.evidence_class != CLASS_A
         assert law.approval != APPROVED
     # the injected instructions must not have produced laws with stronger claims
-    assert all("unrestricted" not in (l.statement + json.dumps(l.grounding.extracted)).lower()
-               or l.evidence_class == CLASS_D for l in laws)
+    assert all("unrestricted" not in (lw.statement + json.dumps(lw.grounding.extracted)).lower()
+               or lw.evidence_class == CLASS_D for lw in laws)
 
 
 def test_stale_grounding_is_rejected_before_execution(defect_repo, tmp_path):
@@ -369,7 +386,7 @@ def test_hung_candidate_is_environment_error_not_a_defect(tmp_path):
     module = 'export function spin(): number { while (true) {} }\n'
     repo = _make_repo(tmp_path / "hang", readme="# h\n\n### `spin()`\n\nDoes nothing.\n",
                       module_src=module, module_path="src/index.ts")
-    from actenon_shipguard.bde.scheduler import build_lawpack, run_lawpack
+    from actenon_shipguard.bde.scheduler import run_lawpack
     law = _law(predicate="no_throw", params={}, domain={"args": []})
     law.grounding.file = "src/index.ts"
     import hashlib
@@ -388,8 +405,7 @@ def test_hung_candidate_is_environment_error_not_a_defect(tmp_path):
 def test_mutation_probes_never_touch_the_source(defect_repo, tmp_path):
     """mutation.py requires a disposable repo: prove the developer tree stays byte-equal."""
     from actenon_shipguard.bde.mutation import probe_mutations
-    from actenon_shipguard.bde.scheduler import build_lawpack
-    from actenon_shipguard.orchestrator import repo_fingerprint, clone_isolated
+    from actenon_shipguard.orchestrator import clone_isolated, repo_fingerprint
     before = repo_fingerprint(defect_repo)
     clone = clone_isolated(defect_repo, tmp_path / "work")
     b = collect(clone, "src/index.ts", "HEAD")
@@ -403,7 +419,6 @@ def test_mutation_probes_never_touch_the_source(defect_repo, tmp_path):
 @needs_tsx
 def test_evidence_manifest_and_reproduction_roundtrip(defect_repo, tmp_path):
     from actenon_shipguard.bde.check import run_bde
-    from actenon_shipguard.bde.witness import write_evidence
     result = run_bde(defect_repo, module="src/index.ts", out_dir=tmp_path / "out",
                      tsx_path=str(TSX), allow_local=True, work_dir=tmp_path / "work")
     assert result.findings

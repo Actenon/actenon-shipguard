@@ -1,3 +1,23 @@
+## [0.3.0-preview] — BDE (experimental, branch `bde-discovery-v0.3.0`)
+
+### Added
+- Behavioural Discovery Engine: `shipguard discover | check --base | explain | reproduce | repair --finding`
+- Behavioural-law records with provenance and A/B/C/D evidence classes; versioned lawpack JSON schema
+- Intent Compiler: 8 grounded discovery families (doc examples, splitter boundaries, optional args,
+  preservation cases, round-trip, idempotence, conservation, determinism)
+- Deterministic qualification policy (the proposer never certifies); prompt-injection-resistant
+- Falsification runner: fixed predicate catalogue, seeded generation, boundary grids, delta-debug
+  shrinking, per-law worker isolation with wall-clock timeouts
+- Portable evidence manifests + standalone `bde-repro-*.mjs` reproduction scripts; HTML/JSON/terminal reports
+- Mutation-sensitivity probes and harmless-refactor controls in disposable copies
+- Frozen research benchmark (`benchmarks/bde/`): Track A blind discovery (3/6 discovered, 0 invalid-law
+  FPs, 24 audited-true ufo doc-drift findings) + Track B mutation sensitivity (38.9%, 0 refactor FPs)
+- 20 new tests (155 total); CI BDE smoke test; docs: architecture, provenance/trust, falsification, quickstart
+
+### Fixed
+- Portability: on-disk file modes now sync to the Git index in every repo ShipGuard creates
+  (umask-002 machines previously produced mode-only "changes" that broke Sentinel snapshots)
+
 # Changelog
 
 All notable changes to Actenon ShipGuard. This project adheres to semantic versioning.

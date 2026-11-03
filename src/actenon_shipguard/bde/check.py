@@ -29,8 +29,16 @@ from ..orchestrator import clone_isolated, git_head, repo_fingerprint
 from .authority import AuthorityReport, Policy, annotate_section_arity, qualify
 from .compiler import compile_laws
 from .laws import BehaviouralLaw
-from .scheduler import (STATUS_CONFIRMED, STATUS_ENV_FAILURE, STATUS_INSUFFICIENT, STATUS_VERIFIED,
-                        ExecutionReport, LawOutcome, build_lawpack, run_lawpack)
+from .scheduler import (
+    STATUS_CONFIRMED,
+    STATUS_ENV_FAILURE,
+    STATUS_INSUFFICIENT,
+    STATUS_VERIFIED,
+    ExecutionReport,
+    LawOutcome,
+    build_lawpack,
+    run_lawpack,
+)
 from .sources import EvidenceBundle, collect
 from .witness import Finding, write_evidence
 
@@ -278,7 +286,7 @@ def run_bde(source_repo: Path, *, module: str | None = None, export: str | None 
     if problems:
         result.notes.extend(problems[:5])
 
-    meta = {l.law_id: l for l in laws}
+    meta = {lw.law_id: lw for lw in laws}
     rep = run_lawpack(pack, clone, tsx, laws_meta=meta, mode=mode, per_law_ms=12000, timeout_s=1200)
     result.outcomes = rep.outcomes
     result.executed, result.passed = rep.executed, rep.passed
@@ -320,7 +328,7 @@ def _finish(result: BDEResult, source_repo: Path, before: dict[str, Any], starte
         result.evidence_dir = str(out_dir)
         (out_dir / "bde-laws.json").write_text(json.dumps(
             {"schema_version": 1, "module": result.module, "git_revision": result.revision,
-             "laws": [l.to_dict() for l in (laws or [])]}, indent=2, ensure_ascii=False, default=str))
+             "laws": [lw.to_dict() for lw in (laws or [])]}, indent=2, ensure_ascii=False, default=str))
     if clone is not None:
         # the disposable clone is kept under the gitignored work dir for `shipguard reproduce`
         pass

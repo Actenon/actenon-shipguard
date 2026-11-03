@@ -60,6 +60,37 @@ PASS output for a v1.0 security guarantee.
 
 ---
 
+## New in this branch: the Behavioural Discovery Engine (experimental)
+
+`bde-discovery-v0.3.0` adds the subsystem this product was missing: **discovering justified
+behavioural expectations in existing software and trying to falsify the implementation
+against them** — without anyone hand-authoring the acceptance test that reveals the bug.
+
+```bash
+shipguard discover --module src/index.ts --allow-local   # laws from docs/signatures/tests, then falsify
+shipguard check --base origin/main --allow-local         # change-scoped + regression backbone
+shipguard explain <finding-id>                           # full provenance of a finding
+shipguard reproduce <finding-id>                         # re-execute the witness in a fresh clone
+shipguard repair <finding-id> --agent codex              # optional, independently re-verified
+```
+
+Every law carries provenance (file, lines, sha256, git revision) and an evidence class
+(A authoritative / B independently grounded / C preservation / D inferred); only A/B can
+block, and a D law is promoted only by recorded, deterministic qualification rules — the
+engine never certifies its own invention. The developer's tree is only read (fingerprinted
+before/after); execution happens in a disposable clone behind explicit `--allow-local`
+consent (advisory isolation, like Sentinel's local runner).
+
+**Measured on the frozen 6-defect corpus (blind — no acceptance tests supplied):** 3/6
+historical defects discovered with minimal reproducible witnesses, 0 invalid-law false
+positives, plus 24 audited-true documentation-code contradictions in ufo itself. Mutation
+sensitivity on known-valid code: 38.9% of single-token semantic mutations detected, 0 false
+positives on harmless refactors. All misses are published with causes. See
+[`benchmarks/bde/report.md`](benchmarks/bde/report.md) and
+[`BDE-RELEASE-EVIDENCE.md`](BDE-RELEASE-EVIDENCE.md). This is an experimental preview:
+discovery is evidence-bounded — where a repository states no machine-extractable behaviour,
+BDE finds nothing and says so.
+
 ## What it does (today, in this pre-release)
 
 ShipGuard gates a consequential action behind **two independent signed authorities**:

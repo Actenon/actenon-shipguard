@@ -36,12 +36,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "benchmark"))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from harness import materialize, task_module, task_export            # noqa: E402  (v0.2.0 corpus harness)
-from actenon_shipguard.bde.authority import Policy, annotate_section_arity, qualify   # noqa: E402
-from actenon_shipguard.bde.compiler import compile_laws              # noqa: E402
-from actenon_shipguard.bde.mutation import probe_mutations           # noqa: E402
+from harness import materialize, task_module  # noqa: E402  (v0.2.0 corpus harness)
+
+from actenon_shipguard.bde.authority import Policy, annotate_section_arity, qualify  # noqa: E402
+from actenon_shipguard.bde.compiler import compile_laws  # noqa: E402
+from actenon_shipguard.bde.mutation import probe_mutations  # noqa: E402
 from actenon_shipguard.bde.scheduler import build_lawpack, run_lawpack  # noqa: E402
-from actenon_shipguard.bde.sources import collect                    # noqa: E402
+from actenon_shipguard.bde.sources import collect  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 V020_MANIFEST = REPO_ROOT / "BENCHMARK-MANIFEST-v0.2.0.json"
@@ -70,7 +71,7 @@ def _discover(repo: Path, module: str, revision: str, tsx: Path):
     annotate_section_arity(laws, bundle)
     report = qualify(laws, Policy())
     pack, problems = build_lawpack(laws, module, revision, repo)
-    meta = {l.law_id: l for l in laws}
+    meta = {lw.law_id: lw for lw in laws}
     execution = run_lawpack(pack, repo, tsx, laws_meta=meta, mode="discover") if pack else None
     return {"bundle": bundle, "laws": laws, "authority": report, "pack": pack,
             "problems": problems, "execution": execution}
@@ -123,7 +124,7 @@ def run_track_a(work: Path, tsx: Path, v020: dict[str, Any], audit: dict[str, st
         }
         for f in (ex.findings if ex else []):
             law = f.get("law") or {}
-            full_law = next((l for l in d["laws"] if l.law_id == law.get("law_id")), None)
+            full_law = next((lw for lw in d["laws"] if lw.law_id == law.get("law_id")), None)
             witness = f.get("args") if isinstance(f.get("args"), list) else (f.get("original_args") or [])
             status_at_fix = _witness_status_at(full_law, witness, fix_repo, mod, tsx) if full_law else "ERROR"
             sig = _finding_signature(f)
@@ -206,7 +207,6 @@ def run_track_b(work: Path, tsx: Path, v020: dict[str, Any]) -> dict[str, Any]:
 
 
 def freeze(engine_commit: str) -> dict[str, Any]:
-    v020 = json.loads(V020_MANIFEST.read_text())
     manifest = {
         "schema": "actenon-shipguard/bde/benchmark-manifest/1",
         "frozen_at": _now(),

@@ -2,10 +2,10 @@ name: ci
 
 on:
   push:
-    branches: [main, v0.2.0]
+    branches: [main, v0.2.0, bde-discovery-v0.3.0]
     tags: ["v*"]
   pull_request:
-    branches: [main]
+    branches: [main, bde-discovery-v0.3.0]
 
 # `shell: bash` makes every run step use `bash -eo pipefail`, so a failing command inside a pipe
 # (e.g. `pytest ... | tee`) propagates its non-zero status instead of being masked by tee's exit 0.
@@ -66,6 +66,52 @@ jobs:
         run: |
           set -euo pipefail
           actenon-shipguard demo --out /tmp/sg-demo --trials 20000
+
+      - name: BDE behavioural discovery smoke test (CLI end-to-end on a real defective repo)
+        # Builds a minimal real repository whose documented example crashes (the ufo
+        # parseFilename defect shape), then requires `shipguard discover` to confirm it.
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/bde-smoke/src && cd /tmp/bde-smoke
+          git init -q && git config user.email ci@actenon.local && git config user.name ci
+          cat > src/index.ts <<'TS'
+          /** Parses and returns the last path segment.
+           * @example
+           * ```js
+           * lastSegment("/a/b/file.txt");
+           * // -> "file.txt"
+           * ```
+           */
+          export function lastSegment(input = "", { strict }): string | undefined {
+            const m = input.match(/\/([^/]+)$/);
+            return m ? m[1] : undefined;
+          }
+          TS
+          cat > README.md <<'MD'
+          # smoke
+
+          ### `lastSegment(input)`
+
+          **Example:**
+
+          ```js
+          // -> "file.txt"
+          lastSegment("/a/b/file.txt");
+          ```
+          MD
+          printf '{"name":"smoke","version":"1.0.0","type":"module","private":true}' > package.json
+          git add -A && git commit -qm smoke
+          set +e
+          shipguard discover --module src/index.ts --out /tmp/bde-out --allow-local | tee /tmp/bde-discover.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "discover exit code: $code (expect 1: confirmed contradiction)"
+          test "$code" -eq 1
+          grep -q "CONFIRMED_CONTRADICTION" /tmp/bde-discover.txt
+          grep -q "documented call threw" /tmp/bde-discover.txt
+          test -f /tmp/bde-out/bde-evidence.json
+          test -f /tmp/bde-out/bde-report.html
+          echo "BDE discover smoke: OK"
 
       - name: Confirm demo verdict
         run: |

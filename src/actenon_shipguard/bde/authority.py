@@ -25,8 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .laws import (APPROVED, CLASS_A, CLASS_B, CLASS_C, CLASS_D, QUALIFIED, UNAPPROVED,
-                   BehaviouralLaw)
+from .laws import APPROVED, CLASS_A, CLASS_B, CLASS_C, CLASS_D, QUALIFIED, UNAPPROVED, BehaviouralLaw
 
 
 @dataclass

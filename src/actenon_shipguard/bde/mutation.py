@@ -15,13 +15,12 @@ law noticed a genuine behavioural change, not a syntax catastrophe.
 from __future__ import annotations
 
 import shutil
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .laws import BehaviouralLaw
-from .scheduler import ExecutionReport, build_lawpack, run_lawpack
+from .scheduler import build_lawpack, run_lawpack
 
 # (mutation_id, description, [(old_token, new_token)], max_occurrences)
 OPERATORS: list[tuple[str, str, tuple[str, str], int]] = [
@@ -94,7 +93,7 @@ def probe_mutations(source_repo: Path, module: str, laws: list[BehaviouralLaw], 
     pack, problems = build_lawpack(laws, module, "mutation-probe", source_repo)
     if pack is None:
         return {"error": "lawpack failed validation", "problems": problems[:5]}
-    meta = {l.law_id: l for l in laws}
+    meta = {lw.law_id: lw for lw in laws}
     clean = run_lawpack(pack, source_repo, tsx, laws_meta=meta, mode=mode)
     clean_failed = {o.law_id for o in clean.outcomes if o.status == "FAIL"}
 

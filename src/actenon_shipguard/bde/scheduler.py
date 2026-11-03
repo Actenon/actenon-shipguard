@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from . import strategies
-from .laws import (CLASS_C, BehaviouralLaw, lawpack_for, validate_lawpack)
+from .laws import CLASS_C, BehaviouralLaw, lawpack_for, validate_lawpack
 
 RUNNER = Path(__file__).resolve().parent / "runner.mjs"
 

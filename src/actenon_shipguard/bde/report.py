@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .check import BDEResult
-from .scheduler import STATUS_CONFIRMED, STATUS_HYPOTHESIS, STATUS_VERIFIED
+from .scheduler import STATUS_CONFIRMED, STATUS_VERIFIED
 
 
 def _esc(s: Any) -> str:
@@ -37,7 +37,7 @@ def terminal_summary(result: BDEResult) -> str:
         ap(f"Executed  : {result.executed} laws — {result.passed} passed · {result.failed} violated · "
            f"{result.errors} errored · {result.skipped} out-of-scope  ({result.duration_ms} ms)")
     else:
-        ap(f"Executed  : 0 laws — see notes")
+        ap("Executed  : 0 laws — see notes")
     ap("")
     if result.findings:
         for f in result.findings:

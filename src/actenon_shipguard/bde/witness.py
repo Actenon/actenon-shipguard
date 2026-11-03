@@ -13,14 +13,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .laws import BehaviouralLaw
-from .scheduler import (STATUS_CONFIRMED, STATUS_HYPOTHESIS, STATUS_REGRESSION, STATUS_REVIEW,
-                        LawOutcome)
+from .scheduler import STATUS_REVIEW
 
 FINDING_SCHEMA_VERSION = 1
 
@@ -104,7 +102,6 @@ def reproduce_script(finding: Finding, module: str) -> str:
     """
     args_json = json.dumps(finding.minimal_args, ensure_ascii=False)
     expected_json = json.dumps(finding.expected, ensure_ascii=False, default=str)
-    law_stmt = json.dumps((finding.law.get("statement") or "")[:200], ensure_ascii=False)
     law_line = json.dumps(_first_line_of(finding.law.get("statement")), ensure_ascii=False)
     g = finding.law.get("grounding") or {}
     grounding = json.dumps(f"{g.get('file')}:{g.get('line_start')}", ensure_ascii=False)

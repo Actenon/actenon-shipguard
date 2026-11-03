@@ -31,7 +31,7 @@ import hashlib
 import json
 import re
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -272,4 +272,4 @@ def write_schema(path: Path | None = None) -> Path:
 
 def lawpack_for(module: str, laws: list[BehaviouralLaw], revision: str) -> dict[str, Any]:
     return {"schema_version": SCHEMA_VERSION, "module": module, "git_revision": revision,
-            "laws": [l.to_dict() for l in laws]}
+            "laws": [lw.to_dict() for lw in laws]}
