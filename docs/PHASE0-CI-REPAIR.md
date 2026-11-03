@@ -65,9 +65,8 @@ separate real-Sentinel integration job. Node 22 with native stripping disabled:
 wheel demo passed on Python 3.11 / Node 20. `ruff` and `git diff --check` passed.
 Machine-readable baseline, errors and repaired matrix: `evidence/phase0/`.
 
-Remote validation is pending this commit's CI; local results do not establish
-remote green status. No merge, release or product-value claim is authorised by
-these runtime checks.
+Remote validation is recorded below. No merge, release or product-value claim is
+authorised by these runtime checks.
 
 ## Remote verification
 

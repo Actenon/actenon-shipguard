@@ -1,7 +1,8 @@
 # Scientific-validity audit
 
 Audited source: original PR head `98a7e5e` and the Phase 0 runtime repair `8bc815c`.
-This audit has not changed discovery algorithms or rescored an unseen holdout.
+The audit describes the original engine; the remediation section records changes
+made before freezing. No unseen holdout was rescored.
 
 ## Independence and the original 3/6
 

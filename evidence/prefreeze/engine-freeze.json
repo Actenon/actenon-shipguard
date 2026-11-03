@@ -1,0 +1,28 @@
+{
+  "schema": "shipguard/engine-freeze/v1",
+  "frozen_at": "2026-11-03T20:03:12.854164+00:00",
+  "engine_commit": "137a68005dc85c765fbd02280268f539a6131001",
+  "clean_git_tree": true,
+  "git_archive_sha256": "b306fc8595b721bb717fa56a94e89f9a8e8bf01fd031339f2dae3b39a7f09f69",
+  "source_tree_sha256": "322ceb8af8bd69eca2d5aa577c76b8f60f5af6b43f009e44cd42d432a8c5d2c7",
+  "wheel_sha256": "21eac01e86e014bec233ef9dc8babc3ff9df49650b8149674c7d9b5d9b46bedb",
+  "runtime_image": "sha256:8d58dcef7607bd66c216abb190d8b23f091526b7a3d55fbb71b052e4dfdee2d7",
+  "node": "20.20.2",
+  "tsx": "4.20.6",
+  "ci": "https://github.com/Actenon/actenon-shipguard/actions/runs/41708530409",
+  "holdout_targets_selected": false,
+  "authority_policy": "shipped defaults: explicit documented literal discrepancies only; inferred semantics unapproved",
+  "codex": {
+    "version": "0.163.0",
+    "model": "gpt-6-astra",
+    "effort": "xhigh",
+    "time_budget_seconds_per_arm": 300,
+    "max_agent_invocations_per_arm": 2,
+    "hard_token_cap": null,
+    "token_policy": "record complete actual usage; equal wall-clock budget, no unsupported hard token cap claim"
+  },
+  "evaluation_seed": 20261103,
+  "evaluator": "separate agent, private Docker volume; not an independent organisation",
+  "harness_status": "protocol preregistered; orchestration implementation will be hashed before task execution and any amendments disclosed",
+  "protocol_sha256": "3786af9bc1d17352cbcc65d17f2496651f1f70fd569a996ff9a0532e9167d709"
+}
