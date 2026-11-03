@@ -57,7 +57,12 @@ export function probe() {
 
 def test_output_flood_is_killed_without_unbounded_capture(tmp_path, image):
     report = execute(tmp_path, image,
-                     "import {writeSync} from 'node:fs'; export function probe() { while(true) writeSync(1,'x'.repeat(65536)); }",
+                     # Docker's stdout pipe may be nonblocking. Retry backpressure so this
+                     # probe keeps flooding until the external cap kills it.
+                     "import {writeSync} from 'node:fs'; export function probe() { "
+                     "const pause = new Int32Array(new SharedArrayBuffer(4)); "
+                     "while(true) { try { writeSync(1,'x'.repeat(65536)); } "
+                     "catch(e) { if(e.code !== 'EAGAIN') throw e; Atomics.wait(pause,0,0,1); } } }",
                      per_law_ms=5000, timeout_s=10, max_output_bytes=100000)
     assert report.runner_error and "output exceeded" in report.runner_error, report
     assert report.findings == []

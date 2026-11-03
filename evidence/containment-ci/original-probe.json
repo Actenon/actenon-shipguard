@@ -1,0 +1,45 @@
+[
+  {
+    "n": 0,
+    "limit": "output exceeded 100000 bytes"
+  },
+  {
+    "n": 1,
+    "limit": "output exceeded 100000 bytes"
+  },
+  {
+    "n": 2,
+    "limit": "output exceeded 100000 bytes"
+  },
+  {
+    "n": 3,
+    "limit": "output exceeded 100000 bytes"
+  },
+  {
+    "n": 4,
+    "exit": 1,
+    "stdout_bytes": 99019,
+    "tail": "    \"predicate\": \"example_executable\",\n      \"export\": \"probe\",\n      \"args\": [],\n      \"original_args\": [],\n      \"shrunk\": false,\n      \"kind\": \"documented_call_threw\",\n      \"detail\": \"documented call threw Error: EAGAIN: resource temporarily unavailable, write\",\n      \"observed\": \"threw Error: EAGAIN: resource temporarily unavailable, write\",\n      \"first_failing_trial\": 0\n    }\n  ],\n  \"law_results\": [\n    {\n      \"law_id\": \"probe\",\n      \"predicate\": \"example_executable\",\n      \"status\": \"FAIL\",\n      \"trials\": 1,\n      \"shrunk\": false,\n      \"duration_ms\": 203\n    }\n  ],\n  \"errors\": []\n}",
+    "stderr": ""
+  },
+  {
+    "n": 5,
+    "limit": "output exceeded 100000 bytes"
+  },
+  {
+    "n": 6,
+    "limit": "output exceeded 100000 bytes"
+  },
+  {
+    "n": 7,
+    "limit": "output exceeded 100000 bytes"
+  },
+  {
+    "n": 8,
+    "limit": "output exceeded 100000 bytes"
+  },
+  {
+    "n": 9,
+    "limit": "output exceeded 100000 bytes"
+  }
+]
