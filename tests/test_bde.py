@@ -271,6 +271,7 @@ def test_discover_finds_the_defect_end_to_end(defect_repo, tmp_path):
     assert pack is not None, problems
     meta = {lw.law_id: lw for lw in laws}
     ex = run_lawpack(pack, defect_repo, TSX, laws_meta=meta, mode="discover")
+    assert ex.errors == 0 and ex.executed == len(pack["laws"]), ex.outcomes
     assert ex.failed >= 1, "the digit/caseless-boundary defect must be falsified"
     found = [(f["law"]["kind"], str(f.get("args"))) for f in ex.findings]
     assert any("split_boundary" in k for k, _ in found)
@@ -280,6 +281,7 @@ def test_discover_finds_the_defect_end_to_end(defect_repo, tmp_path):
                               "src/index.ts", "HEAD", defect_repo)
     if pack_p and pack_p["laws"]:
         ex_p = run_lawpack(pack_p, defect_repo, TSX, laws_meta={lw.law_id: lw for lw in laws_p})
+        assert ex_p.errors == 0 and ex_p.executed == len(pack_p["laws"]), ex_p.outcomes
         assert ex_p.failed == 0
 
 
@@ -399,6 +401,7 @@ def test_hung_candidate_is_environment_error_not_a_defect(tmp_path):
                      per_law_ms=1500)
     o = ex.outcomes_for(law.law_id)
     assert o is not None and o.status == "ERROR", "a hang must be an environment error, not a violation"
+    assert "wall-clock timeout" in o.detail, o.detail
     assert ex.findings == []
 
 
@@ -439,3 +442,41 @@ def test_evidence_manifest_and_reproduction_roundtrip(defect_repo, tmp_path):
 def test_existing_security_test_files_still_collected():
     for name in ("test_trust_boundary.py", "test_evidence_integrity.py", "test_sentinel.py"):
         assert (Path(__file__).parent / name).exists()
+
+
+@needs_tsx
+@pytest.mark.parametrize("extension", ["ts", "mts", "cts"])
+def test_worker_loads_typescript_and_transitive_imports(tmp_path, extension):
+    """Enums need transformation: Node 22's native strip-only loader cannot hide failure."""
+    from actenon_shipguard.bde.scheduler import run_lawpack
+    repo = _make_repo(tmp_path / "typed", readme="# typed\n",
+                      module_path=f"src/index.{extension}",
+                      module_src=f'import {{ Value }} from "./value.{extension}";\n'
+                                 'export function answer(): number { return Value.Answer; }\n')
+    (repo / f"src/value.{extension}").write_text('export enum Value { Answer = 42 }\n')
+    pack = {"schema_version": 1, "module": f"src/index.{extension}", "git_revision": "HEAD",
+            "laws": [{"law_id": "typed", "predicate": "example_executable", "export": "answer",
+                      "params": {"expected": 42},
+                      "gen": {"mode": "literal", "args": [], "shrink": False}}]}
+    ex = run_lawpack(pack, repo, TSX)
+    assert (ex.executed, ex.passed, ex.errors, ex.skipped) == (1, 1, 0, 0), ex
+    assert not ex.runner_error
+    # A wrong result must still fail through exactly the same loader path.
+    pack["laws"][0]["params"]["expected"] = 43
+    negative = run_lawpack(pack, repo, TSX)
+    assert (negative.executed, negative.failed, negative.errors) == (1, 1, 0), negative
+    assert negative.findings[0]["observed"] == 42
+
+
+@needs_tsx
+def test_import_failure_is_visible_as_environment_failure(defect_repo, tmp_path):
+    from actenon_shipguard.bde.check import run_bde
+    src = defect_repo / "src/index.ts"
+    src.write_text('import "./missing-dependency.ts";\n' + src.read_text())
+    result = run_bde(defect_repo, module="src/index.ts", out_dir=tmp_path / "out",
+                     tsx_path=str(TSX), allow_local=True, work_dir=tmp_path / "work")
+    assert result.overall_status == "ENVIRONMENT_FAILURE"
+    assert result.executed == 0 and result.errors > 0
+    assert result.findings == []
+    assert any("missing-dependency" in (o.detail or "") for o in result.outcomes)
+    assert "missing-dependency" in json.dumps(result.notes)

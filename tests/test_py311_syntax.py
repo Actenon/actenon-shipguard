@@ -1,50 +1,69 @@
-"""Python 3.11 syntax compatibility — the project's declared minimum (`target-version = "py311"`).
+"""Check compatibility with the actual minimum interpreter, including PEP 701.
 
-CI runs 3.11 and 3.12, but development happens on newer interpreters, and a construct that is legal
-on 3.12+ can be a SyntaxError on 3.11. That is not hypothetical: a multi-line expression inside an
-f-string replacement field (PEP 701, 3.12+) broke `verify (3.11)` on commit 32e987a while passing
-locally on 3.14 and passing ruff, whose `target-version` does not check for it.
-
-`ast.parse(..., feature_version=(3, 11))` does NOT catch this class, so the guard inspects the AST
-directly: a `FormattedValue` whose span crosses lines means the `{...}` field held a multi-line
-expression, which 3.11 rejects. Implicit concatenation of single-line f-strings — the style used
-everywhere else here — is unaffected.
+FormattedValue locations differ across Python versions and do not reliably describe
+replacement fields. Nor does feature_version emulate every older tokenizer rule.
+Compile (without importing or executing) all project sources using Python 3.11.
+CI provisions that interpreter in every matrix job; absence is a failure, not a skip.
 """
 from __future__ import annotations
 
-import ast
+import json
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIRS = ("src", "tests", "benchmark")
+import pytest
 
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE_DIRS = ("src", "tests", "benchmark", "benchmarks", "scripts")
+
+# Preserve the exact regression that originally motivated this guard.
 BROKEN_EXAMPLE = '''a(f"- x **{d.get('n')}** only. "
   f"{('some long text '
      'continued here') if d.get('n') == 'claude' else 'other'} "
   "tail")
 '''
 
+COMPILER = '''
+import json, sys
+assert sys.version_info[:2] == (3, 11), sys.version
+errors = {}
+for filename, source in json.load(sys.stdin).items():
+    try:
+        compile(source, filename, 'exec')
+    except SyntaxError as e:
+        errors[filename] = {'line': e.lineno, 'message': e.msg}
+print(json.dumps(errors))
+'''
 
-def _multiline_fields(src: str) -> list[int]:
-    return [n.lineno for n in ast.walk(ast.parse(src))
-            if isinstance(n, ast.FormattedValue) and n.end_lineno and n.end_lineno > n.lineno]
+
+def _compile311(sources: dict[str, str]) -> dict:
+    python = os.environ.get("SHIPGUARD_PYTHON311") or (
+        sys.executable if sys.version_info[:2] == (3, 11) else shutil.which("python3.11"))
+    assert python, "Python 3.11 is required for the compatibility guard; set SHIPGUARD_PYTHON311"
+    proc = subprocess.run([python, "-I", "-c", COMPILER], input=json.dumps(sources),
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, f"Python 3.11 compatibility compiler failed: {proc.stderr}"
+    return json.loads(proc.stdout)
 
 
-def test_the_detector_actually_detects_the_construct_it_guards():
-    """A guard that cannot fail is not a guard. This is its negative control."""
-    assert _multiline_fields(BROKEN_EXAMPLE) == [2]
+@pytest.mark.parametrize("source", [BROKEN_EXAMPLE, 'type Alias = int', 's = f"{d["x"]}"'])
+def test_the_detector_actually_detects_the_construct_it_guards(source):
+    assert "negative.py" in _compile311({"negative.py": source})
 
 
-def test_no_source_uses_a_multiline_fstring_replacement_field():
-    offenders: dict[str, list[int]] = {}
-    checked = 0
-    for d in SOURCE_DIRS:
-        for path in sorted((ROOT / d).rglob("*.py")):
-            checked += 1
-            lines = _multiline_fields(path.read_text())
-            if lines:
-                offenders[str(path.relative_to(ROOT))] = lines
-    assert checked > 20, f"only scanned {checked} files — the guard is not covering the project"
-    assert not offenders, (
-        f"these f-string replacement fields span multiple lines and are a SyntaxError on Python 3.11 "
-        f"(the declared minimum): {offenders}. Hoist the expression into a local variable.")
+def test_valid_multiline_and_concatenated_fstrings_are_accepted():
+    sources = {
+        "concat.py": 's = (f"{x}"\n f"{y}")',
+        "triple.py": 's = f"""{(1 +\n 2)}"""',
+    }
+    assert _compile311(sources) == {}
+
+
+def test_all_source_compiles_on_python311():
+    sources = {str(p.relative_to(ROOT)): p.read_text()
+               for d in SOURCE_DIRS for p in sorted((ROOT / d).rglob("*.py"))}
+    assert len(sources) > 20, f"only scanned {len(sources)} files"
+    assert not (errors := _compile311(sources)), errors

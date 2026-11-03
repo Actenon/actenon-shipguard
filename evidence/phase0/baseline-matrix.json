@@ -1,0 +1,22 @@
+[
+  {
+    "label": "py311-node20",
+    "exit": 1,
+    "summary": "6 failed, 16 passed in 5.67s"
+  },
+  {
+    "label": "py312-node20",
+    "exit": 1,
+    "summary": "4 failed, 18 passed in 5.65s"
+  },
+  {
+    "label": "py311-node22",
+    "exit": 1,
+    "summary": "2 failed, 20 passed in 7.82s"
+  },
+  {
+    "label": "py312-node22",
+    "exit": 0,
+    "summary": "22 passed in 7.71s"
+  }
+]

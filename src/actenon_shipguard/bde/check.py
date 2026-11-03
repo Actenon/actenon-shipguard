@@ -142,6 +142,8 @@ def _overall(findings: list[Finding], rep: ExecutionReport, executed_any: bool,
     regressions = [f for f in findings if f.bde_status == "REGRESSION_OBSERVED"]
     if confirmed or regressions:
         return STATUS_CONFIRMED if confirmed else "REGRESSION_OBSERVED"
+    if env_failed:
+        return STATUS_ENV_FAILURE
     return STATUS_VERIFIED
 
 
@@ -296,12 +298,13 @@ def run_bde(source_repo: Path, *, module: str | None = None, export: str | None 
     for f in rep.findings:
         result.findings.append(Finding.from_execution(f, module, result.revision, pkg, module_sha))
     result.overall_status = _overall(result.findings, rep, executed_any=rep.executed > 0,
-                                     env_failed=bool(rep.runner_error))
+                                     env_failed=bool(rep.runner_error or rep.errors))
     if rep.runner_error:
         result.notes.append(f"runner: {rep.runner_error}")
     result.not_checked.append({"reason": "hypothesis-grade laws are executed but never blocking",
                                "laws": result.laws_hypotheses})
     if result.errors:
+        result.notes.extend(f"law {o.law_id}: {o.detail}" for o in result.outcomes if o.status == "ERROR")
         result.not_checked.append({"reason": f"{result.errors} laws errored (environment) "
                                              "and are excluded from the verdict", "laws": result.errors})
     _finish(result, source_repo, fingerprint_before, started, evidence=True, out_dir=out_dir,

@@ -120,7 +120,8 @@ def run_lawpack(pack: dict[str, Any], repo: Path, tsx: Path, *, per_law_ms: int 
     work.parent.mkdir(parents=True, exist_ok=True)
     work.write_text(json.dumps(pack))
     try:
-        proc = subprocess.run([str(tsx), str(RUNNER), "--lawpack", str(work), "--repo", str(repo),
+        proc = subprocess.run([str(tsx), str(RUNNER), "--tsx", str(tsx.resolve()),
+                               "--lawpack", str(work), "--repo", str(repo),
                                "--per-law-ms", str(per_law_ms)],
                               capture_output=True, text=True, timeout=timeout_s)
     except subprocess.TimeoutExpired:

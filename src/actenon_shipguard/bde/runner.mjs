@@ -14,12 +14,13 @@
 //   * Every failing input is shrunk (delta debugging over JSON values) to a minimal witness.
 //
 // Output (stdout, JSON): {module, executed, findings[], law_results[], errors[]}
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isMainThread, parentPort, workerData } from 'node:worker_threads';
 
-const RUNNER_VERSION = 1;
+const RUNNER_VERSION = 2;
 
 // ---------------------------------------------------------------- seeded determinism -------- //
 function mulberry32(seed) {
@@ -337,8 +338,8 @@ const PREDICATES = {
 };
 
 // ---------------------------------------------------------------- law execution (worker side) -- //
-async function executeLaw(law, modulePath) {
-  const mod = await import(pathToFileURL(resolvePath(modulePath)).href);
+async function executeLaw(law, modulePath, tsImport) {
+  const mod = await tsImport(pathToFileURL(resolvePath(modulePath)).href, import.meta.url);
   const fn = mod[law.export];
   if (typeof fn !== 'function') return { law_id: law.law_id, status: 'ERROR', detail: `export ${law.export} is not a function`, trials: 0 };
   const pred = PREDICATES[law.predicate];
@@ -415,12 +416,15 @@ async function executeLaw(law, modulePath) {
 
 // ---------------------------------------------------------------- worker bootstrap ------------ //
 if (!isMainThread && parentPort) {
-  const { law, modulePath } = workerData;
+  const { law, modulePath, tsxApi } = workerData;
   try {
-    const result = await executeLaw(law, modulePath);
+    // CLI loader hooks do not reliably propagate to workers. Import through tsx's
+    // public API in THIS worker; Node 22 native stripping can otherwise hide the bug.
+    const { tsImport } = await import(tsxApi);
+    const result = await executeLaw(law, modulePath, tsImport);
     parentPort.postMessage({ ok: true, result });
   } catch (e) {
-    parentPort.postMessage({ ok: false, error: `${e?.constructor?.name}: ${e?.message}` });
+    parentPort.postMessage({ ok: false, error: `${e?.code || e?.constructor?.name}: ${e?.message}` });
   }
 }
 
@@ -430,12 +434,16 @@ async function main() {
   const opt = (name) => { const i = argv.indexOf('--' + name); return i >= 0 ? argv[i + 1] : undefined; };
   const lawpackPath = opt('lawpack');
   const repo = opt('repo');
+  const tsxCli = opt('tsx');
   const perLawMs = Number(opt('per-law-ms') || 10000);
-  if (!lawpackPath || !repo) {
-    console.error('usage: tsx runner.mjs --lawpack <path.json> --repo <path> [--per-law-ms N]');
+  if (!lawpackPath || !repo || !tsxCli) {
+    console.error('usage: tsx runner.mjs --tsx <tsx-cli-path> --lawpack <path.json> --repo <path> [--per-law-ms N]');
     process.exit(2);
   }
   const pack = JSON.parse(readFileSync(resolvePath(lawpackPath), 'utf8'));
+  // Resolve from the configured CLI installation, never from target node_modules.
+  // This works for global installs, .bin symlinks and installed Python wheels.
+  const tsxApi = pathToFileURL(createRequire(realpathSync(tsxCli)).resolve('tsx/esm/api')).href;
   const modulePath = resolvePath(repo, pack.module);
   const out = { module: pack.module, runner_version: RUNNER_VERSION, executed: 0, findings: [], law_results: [], errors: [] };
 
@@ -445,7 +453,7 @@ async function main() {
     const result = await new Promise((resolve) => {
       let settled = false;
       const settle = (v) => { if (!settled) { settled = true; clearTimeout(timer); resolve(v); } };
-      const w = new Worker(new URL(import.meta.url), { workerData: { law, modulePath } });
+      const w = new Worker(new URL(import.meta.url), { workerData: { law, modulePath, tsxApi } });
       const timer = setTimeout(() => { try { w.terminate(); } catch { /* already gone */ } }, perLawMs);
       w.on('message', (m) => { try { w.terminate(); } catch { /* already gone */ } settle(m); });
       w.on('error', (e) => {
@@ -463,13 +471,14 @@ async function main() {
     }
     const r = result.result;
     out.law_results.push({ law_id: law.law_id, predicate: law.predicate, status: r.status, trials: r.trials, detail: r.detail, shrunk: r.shrunk, duration_ms: duration });
-    out.executed++;
+    if (r.status === 'PASS' || r.status === 'FAIL') out.executed++;
+    if (r.status === 'ERROR') out.errors.push({ law_id: law.law_id, error: r.detail });
     for (const fl of (r.findings || (r.finding ? [r.finding] : []))) {
       out.findings.push(fl);
     }
   }
   process.stdout.write(JSON.stringify(out, null, 2));
-  process.exit(out.findings.length > 0 ? 1 : 0);
+  process.exit(out.errors.length > 0 ? 2 : out.findings.length > 0 ? 1 : 0);
 }
 
 if (isMainThread) {

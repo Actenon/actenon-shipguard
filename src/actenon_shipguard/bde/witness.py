@@ -155,6 +155,11 @@ def write_evidence(out_dir: Path, result: "BDEResult") -> Path:   # noqa: F821
             "overall_status": result.overall_status,
         },
         "findings": [f.to_dict() for f in result.findings],
+        "law_outcomes": [
+            {"law_id": o.law_id, "predicate": o.predicate, "status": o.status,
+             "trials": o.trials, "detail": o.detail, "duration_ms": o.duration_ms}
+            for o in result.outcomes],
+        "notes": result.notes,
         "checked_and_passed": [
             {"law_id": o.law_id, "predicate": o.predicate, "trials": o.trials}
             for o in result.outcomes if o.status == "PASS"],
