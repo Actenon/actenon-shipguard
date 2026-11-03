@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "actenon-shipguard"
-version = "0.1.2"
+version = "0.2.0rc1"
 description = "Your AI agent says it's done. ShipGuard checks before it ships — independent verification + protected consequential execution for AI coding agents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -33,7 +33,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest==8.3.4", "ruff==0.8.4"]
+dev = ["pytest==8.3.4", "ruff==0.8.4", "pyyaml==6.0.3"]
 
 [project.scripts]
 actenon-shipguard = "actenon_shipguard.cli:main"
@@ -53,11 +53,17 @@ actenon_shipguard = [
   "_bundled/contracts/*.json",
   "_bundled/target-settlement/package.json",
   "_bundled/target-settlement/src/*.ts",
+  "bde/runner.mjs",
+  "bde/laws-schema.json",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+  "bde_containment: mandatory Docker boundary probes in the dedicated CI job",
+  "sentinel_integration: requires the real Sentinel CLI + node_modules(vitest); run in the dedicated CI integration job",
+]
 
 [tool.ruff]
 line-length = 110

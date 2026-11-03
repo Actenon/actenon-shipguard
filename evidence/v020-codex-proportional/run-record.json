@@ -1,0 +1,203 @@
+{
+  "task": "In src/settle.ts, fix splitProportional so it splits a whole-pence total across parties in proportion to integer weights using the largest-remainder (Hamilton) method: floor each exact quota, then award the leftover pennies one each to the parties with the largest fractional quota, breaking ties toward the lower index, so the shares always sum exactly to the total. Edit only src/settle.ts.",
+  "agent": "codex",
+  "mode": "live",
+  "contract_digest": "5d061533c23badda59aab432913df1737846ed81e4a3686bc3c0e6b8cc9f4d07",
+  "git_head": "b5abd271eff32f24f56ecd8f4e4d906f45029fa6",
+  "final_status": "verified",
+  "states": [
+    "INTENT",
+    "APPROVED_CONTRACT",
+    "BASELINE",
+    "CODEBASE_MODEL",
+    "AGENT_CHANGE",
+    "ORDINARY_TESTS",
+    "INDEPENDENT_CHALLENGE",
+    "REVERIFICATION",
+    "ATTESTATION_READY"
+  ],
+  "transitions": [
+    {
+      "ts": "2026-11-02T10:45:37.001081Z",
+      "state": "INTENT",
+      "detail": {
+        "task": "In src/settle.ts, fix splitProportional so it splits a whole-pence total across parties in proportion to integer weights using the largest-remainder (Hamilton) method: floor each exact quota, then award the leftover pennies one each to the parties with the largest fractional quota, breaking ties toward the lower index, so the shares always sum exactly to the total. Edit only src/settle.ts."
+      }
+    },
+    {
+      "ts": "2026-11-02T10:45:37.001432Z",
+      "state": "APPROVED_CONTRACT",
+      "detail": {
+        "contract": "<bundled>/contracts/proportional-contract.json",
+        "digest": "5d061533c23badda59aab432913df1737846ed81e4a3686bc3c0e6b8cc9f4d07",
+        "verifier": "sentinel",
+        "note": "developer-approved Sentinel acceptance contract; held out from the agent"
+      }
+    },
+    {
+      "ts": "2026-11-02T10:45:37.208957Z",
+      "state": "BASELINE",
+      "detail": {
+        "repo": "<project>/evidence/v020-codex-proportional<work>",
+        "git_head": "e2938fe3f31698b0b1f86a4510bf22dccbd6f0da",
+        "note": "buggy baseline (proportional-buggy.ts); weak ordinary tests"
+      }
+    },
+    {
+      "ts": "2026-11-02T10:45:37.209245Z",
+      "state": "CODEBASE_MODEL",
+      "detail": {
+        "target": "src/settle.ts",
+        "export": "splitProportional",
+        "exported_symbols": [
+          "splitProportional"
+        ],
+        "apprentice": "not-wired (structural scan only)",
+        "note": "structural model of the candidate module; Apprentice indexing is a FIFTH item"
+      }
+    },
+    {
+      "ts": "2026-11-02T10:46:26.520770Z",
+      "state": "AGENT_CHANGE",
+      "detail": {
+        "attempt": 0,
+        "agent": "codex",
+        "mode": "live",
+        "outcome": "completed",
+        "changed_files": [
+          "src/settle.ts"
+        ],
+        "statement": "Updated only `src/settle.ts` to floor quotas and award leftover pennies by largest remainder, breaking ties toward the lower index.\n\nValidation passed: 3 existing tests, 5 regression checks, and 10,455 exhaustive cases.",
+        "error": null,
+        "duration_s": 49.15
+      }
+    },
+    {
+      "ts": "2026-11-02T10:46:26.883236Z",
+      "state": "ORDINARY_TESTS",
+      "detail": {
+        "attempt": 0,
+        "ran": true,
+        "passed": true,
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m3 passed\u001b[39m\u001b[22m\u001b[90m (3)\u001b[39m"
+      }
+    },
+    {
+      "ts": "2026-11-02T10:46:29.289339Z",
+      "state": "INDEPENDENT_CHALLENGE",
+      "detail": {
+        "attempt": 0,
+        "verdict": "VERIFIED",
+        "ok": true,
+        "requirements": {
+          "conserve-total": "VERIFIED",
+          "largest-remainder-order": "VERIFIED",
+          "preserve-trivial": "VERIFIED"
+        },
+        "ordinary_tests": {
+          "baseline-tests": "VERIFIED",
+          "candidate-tests": "VERIFIED",
+          "preserved-tests": "VERIFIED"
+        },
+        "receipt_hash": "b0b8c890f9fb82c8f4f7d0ce25170e91f32d420f5d6364badf76b27998358c5e",
+        "counterexample": null,
+        "reasons": []
+      }
+    },
+    {
+      "ts": "2026-11-02T10:46:29.336148Z",
+      "state": "REVERIFICATION",
+      "detail": {
+        "attempt": 0,
+        "verdict": "VERIFIED",
+        "receipt_hash": "b0b8c890f9fb82c8f4f7d0ce25170e91f32d420f5d6364badf76b27998358c5e",
+        "bindings": {
+          "contractHash": "28eddf9e36440238501e68e70823376a9c724243d36dd42e49b4b2cfb990a587",
+          "candidateHash": "2a78eee11b19f7561300fd095574acabdfa43e554fa3c16c5d263efb1a4a3612",
+          "baselineHash": "1ff047ba65d455ead3056b591973a2c1953d420b16390597e9514796f82d1470",
+          "git_head": "e2938fe3f31698b0b1f86a4510bf22dccbd6f0da",
+          "git_branch": "main",
+          "git_dirty": true,
+          "runner": "local-advisory",
+          "verifierVersion": "1.0.0",
+          "vitest": "5.0.5",
+          "node": "v26.12.0",
+          "workerSha256": "c16009148648f57d65398d7741a6d805170a278ea3329f781dc4d005bb2c85ad"
+        },
+        "note": "independent Sentinel verification confirms the repair; ordinary tests also green"
+      }
+    },
+    {
+      "ts": "2026-11-02T10:46:29.336256Z",
+      "state": "ATTESTATION_READY",
+      "detail": {
+        "git_head": "b5abd271eff32f24f56ecd8f4e4d906f45029fa6",
+        "receipt_hash": "b0b8c890f9fb82c8f4f7d0ce25170e91f32d420f5d6364badf76b27998358c5e",
+        "note": "verified candidate committed with full git identity; ready for Workproof attestation"
+      }
+    }
+  ],
+  "attempts": [
+    {
+      "attempt": 0,
+      "agent": {
+        "agent": "codex",
+        "mode": "live",
+        "outcome": "completed",
+        "statement": "Updated only `src/settle.ts` to floor quotas and award leftover pennies by largest remainder, breaking ties toward the lower index.\n\nValidation passed: 3 existing tests, 5 regression checks, and 10,455 exhaustive cases.",
+        "changed_files": [
+          "src/settle.ts"
+        ],
+        "diff": "diff --git a/src/settle.ts b/src/settle.ts\nindex 459ed20..e84bee0 100644\n--- a/src/settle.ts\n+++ b/src/settle.ts\n@@ -1,8 +1,20 @@\n // Proportional settlement split.\n // Splits a whole-pence total across parties in proportion to integer weights.\n-// BUG: naive per-party rounding loses or creates pennies (shares need not sum to the total).\n+// Uses the largest-remainder method, breaking ties toward the lower index.\n \n export function splitProportional(totalPence: number, weights: number[]): number[] {\n   const sum = weights.reduce((a, b) => a + b, 0);\n-  return weights.map((w) => Math.round((totalPence * w) / sum));\n+  const shares = weights.map((w) => Math.floor((totalPence * w) / sum));\n+  const remainders = weights\n+    .map((w, index) => ({\n+      index,\n+      remainder: totalPence * w - shares[index] * sum,\n+    }))\n+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index);\n+  const leftover = totalPence - shares.reduce((a, b) => a + b, 0);\n+\n+  for (let i = 0; i < leftover; i++) {\n+    shares[remainders[i].index]++;\n+  }\n+  return shares;\n }\n",
+        "attempt": 0,
+        "duration_s": 49.15,
+        "error": null,
+        "raw": {
+          "exit": 0,
+          "tokens": null
+        }
+      },
+      "ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m3 passed\u001b[39m\u001b[22m\u001b[90m (3)\u001b[39m"
+      },
+      "challenge": {
+        "ok": true,
+        "verdict": "VERIFIED",
+        "counterexample": null,
+        "requirements": {
+          "conserve-total": "VERIFIED",
+          "largest-remainder-order": "VERIFIED",
+          "preserve-trivial": "VERIFIED"
+        },
+        "ordinary_tests": {
+          "baseline-tests": "VERIFIED",
+          "candidate-tests": "VERIFIED",
+          "preserved-tests": "VERIFIED"
+        },
+        "receipt_hash": "b0b8c890f9fb82c8f4f7d0ce25170e91f32d420f5d6364badf76b27998358c5e",
+        "report_path": "<project>/evidence/v020-codex-proportional<work>",
+        "bindings": {
+          "contractHash": "28eddf9e36440238501e68e70823376a9c724243d36dd42e49b4b2cfb990a587",
+          "candidateHash": "2a78eee11b19f7561300fd095574acabdfa43e554fa3c16c5d263efb1a4a3612",
+          "baselineHash": "1ff047ba65d455ead3056b591973a2c1953d420b16390597e9514796f82d1470",
+          "git_head": "e2938fe3f31698b0b1f86a4510bf22dccbd6f0da",
+          "git_branch": "main",
+          "git_dirty": true,
+          "runner": "local-advisory",
+          "verifierVersion": "1.0.0",
+          "vitest": "5.0.5",
+          "node": "v26.12.0",
+          "workerSha256": "c16009148648f57d65398d7741a6d805170a278ea3329f781dc4d005bb2c85ad"
+        },
+        "reasons": [],
+        "all_counterexamples": []
+      },
+      "git_head": "e2938fe3f31698b0b1f86a4510bf22dccbd6f0da"
+    }
+  ],
+  "final_counterexample": null,
+  "ordinary_tests_green_on_defect": null,
+  "evidence_dir": "<project>/evidence/v020-codex-proportional"
+}

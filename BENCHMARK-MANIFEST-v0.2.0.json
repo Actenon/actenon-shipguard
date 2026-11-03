@@ -1,0 +1,2063 @@
+{
+  "schema": "shipguard/benchmark-manifest/v1",
+  "frozen_at": "2026-11-02T13:28:49.458881Z",
+  "purpose": "Establish whether ShipGuard catches and repairs real coding-agent defects across independent real-world tasks.",
+  "selection_process": {
+    "method": "Cloned real permissively-licensed npm packages; surveyed their Git history for genuine bug-fix commits; took each commit's PARENT as the benchmark baseline so the defect is the project's own historical defect. Acceptance criteria are assertions from the project's own test suite at the fix commit, measured directly by executing the real code at both revisions rather than transcribed by hand. No requirement was invented to make an agent fail and no essential specification detail was withheld from the prompt.",
+    "projects_considered": [
+      "camelcase",
+      "decamelize",
+      "humanize-string",
+      "leven",
+      "pretty-bytes",
+      "parse-ms",
+      "titleize",
+      "escape-string-regexp",
+      "indent-string",
+      "strip-ansi",
+      "plur",
+      "to-milliseconds",
+      "is-fullwidth-code-point",
+      "ms",
+      "bytes",
+      "pathe",
+      "destr",
+      "defu",
+      "remeda",
+      "es-toolkit",
+      "radix3",
+      "mlly",
+      "ohash",
+      "hookable",
+      "exsolve",
+      "confbox",
+      "untyped",
+      "jsonrepair",
+      "marked",
+      "smol-toml",
+      "entities",
+      "scule",
+      "ufo"
+    ],
+    "excluded": {
+      "camelcase": "vetted and suitable but excluded for scope: ~150 lines of subtle Unicode regex logic, too large to prepare and validate reliably here",
+      "pretty-bytes/parse-ms/titleize/escape-string-regexp/indent-string/strip-ansi/plur/to-milliseconds/is-fullwidth-code-point": "test scripts require ava (extra devDependencies) — excluded to keep the ordinary-test signal dependency-free",
+      "ms": "TypeScript + jest with 11 devDependencies — excluded for install weight",
+      "pathe": "MIT, pure path functions and good fix history, but EXCLUDED after direct measurement: at every revision that carries a usable fix (7534c0c, e78663c, 1492827) src/_path.ts imports `zeptomatch`, which the project declares only as a devDependency, so the whole suite fails to collect (`Cannot find package 'zeptomatch'`) under the pinned zero-install node_modules. Only HEAD is green, because the glob import was later moved into src/_glob.ts — and HEAD has no unfixed defect to benchmark. An earlier attempt also hit a different failure: at the older revisions the source layout differs from HEAD, so the probed module did not exist in Sentinel's baseline snapshot (ENVIRONMENT FAILURE / ERR_MODULE_NOT_FOUND). Excluded rather than patched, to keep each task's module path and dependency set faithful to its revision",
+      "destr": "MIT, zero deps, and `destr(str)` is an ideal pure probe target with three real defect fixes (639a5df surrounding whitespace, f9c78d4 escape-char fast path, d9ba16d decimals/scientific notation). EXCLUDED after direct measurement: at all three revisions and their parents the suite fails to collect under the pinned vitest 5.0.5 (destr was on vitest ^0.34 then), while at HEAD — where the suite is green — the history contains no behavioural fix, only dependency churn",
+      "bytes": "clone/package metadata did not expose a usable test script",
+      "defu": "MIT + vitest and a genuine prototype-pollution fix (3942bfb) were found, but the task was DROPPED at the pre-freeze gate because the defect cannot be expressed in Sentinel's contract format. Measured directly: Sentinel parses the approved contract with a schema validator that reconstructs each object, so an own `__proto__` data property in a case argument is normalised away — the contract written to disk contains `{\"__proto__\":{\"isAdmin\":true}}` while the receipt's stored contract object contains `{}`. The malicious input therefore never reaches defu, the check passed for the wrong reason, and ShipGuard's own integrity layer correctly refused the receipt ('receipt contract does not deep-equal the approved contract'). defu's other real hardening fix (11ba022) needs `Object.prototype` mutation, which a pure JSON-argument probe also cannot express. Excluded rather than re-expressed as an artificial requirement",
+      "jsonrepair": "ISC licence, zero runtime deps, pure `jsonrepair(str) -> str`, and two ideal add-only defect fixes were found and measured (ca329f7 zero-width spaces, 8d1754c trailing-comma strips the parent's comma). EXCLUDED after direct measurement: Sentinel does NOT run the project's test script — src/verifier.ts writes its own vitest config (include `**/*.{test,spec}.{js,ts,...}`) and runs vitest itself, so jsonrepair's test-lib/cli.test.js is always collected. That file spawns the built CLI from lib/, which does not exist without a build step, so Sentinel's mandatory baseline-tests/candidate-tests/preserved-tests checks were CONTRADICTED at BOTH the baseline and the upstream fix. Narrowing the package.json test script cannot help, because Sentinel ignores it. Deleting or editing that test file to make the oracle pass is exactly what the mandate forbids, so the project was dropped",
+      "ohash": "MIT + vitest and a clean pure `diff(a, b)` defect (a5004f7, falsy primitives) were found and the criteria were measured, but the task was DROPPED at the pre-freeze gate for the same structural reason as jsonrepair: Sentinel runs its own vitest over every `*.test.*` file, and ohash's test/serialize.test.ts, test/hash.test.ts and test/bundle.test.ts import through src/index.ts, which self-references the `ohash/crypto` subpath export that only resolves against built output. Those three files fail to collect with zero installs, so Sentinel's mandatory ordinary-test checks were CONTRADICTED at both the baseline and the fix",
+      "hookable": "MIT + vitest and green with zero installs, but the API is `createHooks()` returning a stateful registry, not a single pure exported function that a JSON-argument probe can call",
+      "exsolve": "MIT + vitest and green with zero installs, but the exported resolvers return absolute filesystem paths, so the oracle's expected values would be machine-specific rather than portable",
+      "confbox": "MIT + vitest, but 1 test file fails to collect under the pinned vitest with zero installs",
+      "untyped": "MIT + vitest, but all 6 test files fail to collect under the pinned vitest with zero installs",
+      "remeda": "MIT + vitest, but package.json declares no license/test fields at the surveyed revision and the repo is large; excluded for vetting cost",
+      "es-toolkit": "MIT + vitest with many suitable single-function fixes, but `vitest run` executes the whole multi-thousand-test suite (including coverage) per attempt; excluded to keep the ordinary-test signal fast enough to run once per arm per task",
+      "radix3": "MIT + vitest, but the pinned vitest run reported 7 collection errors without the project's own devDependencies, and the router API needs a constructed router rather than a single pure exported function",
+      "mlly": "MIT, but the pinned vitest collected no tests without the project's own vitest configuration/devDependencies",
+      "marked": "MIT and zero runtime deps, but the project does not use vitest (all 6 test files fail to collect under the pinned vitest)",
+      "smol-toml": "BSD-3-Clause and zero runtime deps, but all 11 test files fail to collect under the pinned vitest with zero installs"
+    },
+    "entities_tasks_dropped": {
+      "914e397 fix(escape): escape `<` and `>` in attribute values (#2398)": "A genuinely security-relevant defect — `escapeAttribute` left `<`/`>` unescaped, so '<img src=x onerror=alert(1)>' survived escaping — and the criteria were measured. DROPPED because the upstream fix also CHANGED an existing assertion (escape.spec.ts expected '<a &quot; attr > ...' and now expects '&lt;a &quot; attr &gt; ...'). Gate condition 5 measured the consequence: applying only the source fix to the frozen baseline makes the baseline's own suite fail, so arm A would reject a correct repair",
+      "05af0b3 fix(decode): skip Windows-1252 C1 remap for XML numeric references (#2347)": "DROPPED for the same measured reason: src/index.spec.ts changed an existing astralSpecial expectation from '\\u{20AC}' to '\\u{80}'",
+      "00913aa / d97b64f (streaming decode fixes)": "Purely additive tests and green suites, but the behaviour lives behind the stateful `EntityDecoder` class (startEntity/write/end), which a single-call JSON-argument probe cannot exercise"
+    },
+    "tasks_dropped_by_the_gate": {
+      "scule-segment-lowering (3815767)": "DROPPED by pre-freeze gate condition 5, measured: applying only the upstream source fix to the frozen baseline makes the baseline's OWN suite fail — test/scule.test.ts asserted `pascalCase('FooBARb') === 'FooBARb'` and the fix changes that expectation to 'FooBaRb'. A correct repair would therefore turn arm A's ordinary tests red, and the mandate forbids counting an initially correct solution as a failure. This is a documented behaviour change, not a defect invisible to the project's tests",
+      "ufo-trailing-slash-in-query (6cd1fcd) and ufo-parseurl-protocol-case (768210a)": "Criteria were measured and both are real defects with clean discriminators, but at those 2023/2024 revisions ufo's suite does not run under the pinned vitest 5.0.5, so Sentinel's mandatory ordinary-test checks reported ENVIRONMENT FAILURE at both baseline and fix. ufo revisions from 2025 onward (13 test files) are green, so the ufo tasks were re-selected from that window"
+    },
+    "measured_corpus_constraints": [
+      "Sentinel executes the ordinary tests itself, with its OWN vitest configuration (src/verifier.ts writes include `**/*.{test,spec}.{js,ts,mjs,cjs,mts,cts,jsx,tsx}`, environment node, testTimeout 5000, maxWorkers 1) using the pinned installation's vitest 5.0.5, and it ignores the project's `test` script and vitest config. So every file matching that glob must pass at the baseline revision with zero installs; a project needing a build step or an undeclared runtime dependency cannot be benchmarked at all. This biases the corpus toward recent revisions and is the single largest reason candidates were dropped (jsonrepair, ohash, pathe, destr).",
+      "Sentinel probes call ONE exported function with JSON arguments and compare a JSON-serialisable return, so criteria must be expressible that way. Own `__proto__` keys are normalised away by contract parsing, and `undefined`/`Infinity` returns are not representable, so such cases were excluded from the criteria. `approvedBy` is capped at 200 characters by Sentinel's schema (measured: exit 2 with a zod `too_big` error), so the contract carries a short provenance string and the full provenance stays in this manifest.",
+      "STRUCTURAL FINDING: Sentinel always records a mandatory `preserved-tests` check, which restores the BASELINE's test and control files into a third copy and runs them against the candidate source. A change that alters any behaviour asserted by an existing test therefore can never be VERIFIED, however correct it is. ShipGuard's gate condition 5 measures the same property independently. The corpus is consequently restricted to fixes whose upstream commit ADDS assertions without changing existing ones — which is also exactly the condition that makes arm A's 'ordinary tests only' decision rule fair. Behaviour-change tasks (entities 914e397 and 05af0b3, scule 3815767) are outside what this verifier can accept, and are recorded as dropped rather than forced through."
+    ],
+    "ordinary_test_command": "Each project's own real vitest suite, unmodified, run as `vitest run` for all three projects. Upstream `test` scripts also run `pnpm lint` / typecheck / coverage, which are not behavioural tests and need extra devDependencies; excluding those steps is recorded here. No test file was edited, deleted or weakened. Note that this command is what ARMS A and the harness report; Sentinel's own oracle runs its own vitest configuration independently (see measured_corpus_constraints). vitest itself is supplied by the pinned Sentinel installation's node_modules, so no benchmark-time install occurs.",
+    "sentinel_capability_constraint": "An earlier candidate set (decamelize, humanize-string, leven) was DROPPED because their tests use node:test/ava: Sentinel reported 'No tests executed; an empty suite is not verification' (UNVERIFIED) even though the requirement checks passed. Recorded so the selection is not mistaken for cherry-picking; see measured_corpus_constraints for the full set of constraints actually measured.",
+    "disclosed_extra_cases": "Some requirement cases are NOT verbatim upstream assertions but additional inputs exercising the same documented rule, so that a task whose upstream fix added only one or two discriminating assertions cannot be satisfied by special-casing those inputs. They are named in the affected task's criteria_source: ufo-parsefilename-optional-opts adds two further one-argument inputs ('/path/to/.hidden-file', 'https://example.com/a/b.tar.gz') plus explicit-opts preserves. Every expected value was measured by executing the real code at the fix revision, never transcribed by hand. Nothing essential is withheld from any prompt and no extra requirement is imposed.",
+    "no_selective_omission": "Every task in this manifest is run in every arm; results are reported for all of them, including first-try successes. Candidates and tasks that FAILED vetting or the pre-freeze gate (defu, ohash, jsonrepair, pathe, destr, marked, smol-toml, scule-segment-lowering, the two older ufo revisions, and two entities fixes) are recorded above with the measured reason rather than silently dropped, and `freeze` refuses to write a manifest while any task is invalid.",
+    "corpus_size_honesty": "The mandate asked for roughly 12-20 tasks across at least three projects. This corpus is 6 tasks across 3 projects (scule 2, ufo 3, entities 1). It is smaller than requested because the measured constraints above are restrictive and no task was admitted that failed the pre-freeze gate; the excluded candidates are listed with reasons so the shortfall cannot be confused with cherry-picking. The corpus was NOT expanded after seeing any agent result."
+  },
+  "verifier": {
+    "name": "sentinel-verified",
+    "pinned_commit": "becba502c8dbebdd5e52b8ca09122f86e4e37bb3",
+    "runner": "local (advisory, same OS account — not a security boundary)"
+  },
+  "harness": {
+    "path": "benchmark/harness.py",
+    "sha256": "77e282682ff2d405c38f3e8eeebd7d56a8a354279e30ee51257434fdbe5d4b21",
+    "git_head": "b97cc9914d9f84f89f920586a3ef786a77d608ba",
+    "git_dirty": false,
+    "node_modules_source": "sibling pinned sentinel-verified checkout",
+    "vitest_version": "5.0.5",
+    "python": "3.14.6"
+  },
+  "agent": {
+    "name": "codex",
+    "sandbox": "workspace-write",
+    "auth": "ChatGPT (verified via `codex login status`)",
+    "note": "no --dangerously-skip-permissions; no bypass flag"
+  },
+  "arms": {
+    "A": "ordinary Codex + the project's own tests only (no independent verification)",
+    "B": "same Codex configuration + independent Sentinel verification, no automatic repair",
+    "C": "same Codex configuration + ShipGuard bounded counterexample-driven repair"
+  },
+  "arm_pairing": "Arms A and B are evaluated on ONE shared agent session per task, recorded as arm 'AB'. Arm B adds only a verification GATE and gives the agent no feedback, so by construction the agent's behaviour in A and B is identical; running two sessions would double the cost and add independent sampling noise to a comparison that is meant to be paired. Each AB record therefore carries both decision rules — arm_A_decision (accept iff the project's own tests pass) and arm_B_decision (accept iff the independent oracle verifies) — applied to the same measured output, plus ground_truth_correct from the oracle. Arm C is a separate session because it feeds counterexamples back to the agent.",
+  "projects": {
+    "scule": {
+      "url": "https://github.com/unjs/scule.git",
+      "license": "MIT",
+      "language": "TypeScript (ESM)",
+      "module": "src/index.ts",
+      "test_command": "vitest run",
+      "deps": []
+    },
+    "ufo": {
+      "url": "https://github.com/unjs/ufo.git",
+      "license": "MIT",
+      "language": "TypeScript (ESM)",
+      "module": "src/utils.ts",
+      "test_command": "vitest run",
+      "deps": []
+    },
+    "entities": {
+      "url": "https://github.com/fb55/entities.git",
+      "license": "BSD-2-Clause",
+      "language": "TypeScript (ESM)",
+      "module": "src/decode.ts",
+      "test_command": "vitest run",
+      "deps": [],
+      "test_scope_note": "The upstream `test` script is `npm run test:vi && npm run lint`; only the vitest half is behavioural, so the lint step is dropped from the COMMAND. No test file was edited"
+    }
+  },
+  "tasks": [
+    {
+      "id": "scule-custom-separator-split",
+      "project": "scule",
+      "fix_commit": "57cfd15",
+      "fix_subject": "fix(isUppercase): assume characters lowercase by default (#71)",
+      "kind": "historical-defect",
+      "module": "src/index.ts",
+      "allowed_paths": [
+        "src/index.ts"
+      ],
+      "prompt": "In this project, splitByCase(str, separators) splits a string into words at case boundaries and at the given separator characters. Characters whose case cannot be determined (for example digits and punctuation such as '-') must be treated as lowercase by default, so they never start a new segment on their own. With the custom separator list ['_'], an input like 'new-name-value' contains no separators and no case boundary, so it must come back as the single segment ['new-name-value']. Fix the case-detection default. Edit only src/index.ts.",
+      "criteria_source": "upstream test/scule.test.ts at 57cfd15",
+      "requirements": [
+        {
+          "id": "custom-separator-no-split",
+          "kind": "must-change",
+          "description": "A string with no listed separator and no case boundary is a single segment",
+          "module": "src/index.ts",
+          "export": "splitByCase",
+          "cases": [
+            {
+              "args": [
+                "new-name-value",
+                [
+                  "_"
+                ]
+              ],
+              "expected": [
+                "new-name-value"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "preserve-default-splitting",
+          "kind": "must-preserve",
+          "description": "Default splitting behaviour is unchanged",
+          "module": "src/index.ts",
+          "export": "splitByCase",
+          "cases": [
+            {
+              "args": [
+                "FooBARb"
+              ],
+              "expected": [
+                "Foo",
+                "BA",
+                "Rb"
+              ]
+            },
+            {
+              "args": [
+                "FOO_BAR"
+              ],
+              "expected": [
+                "FOO",
+                "BAR"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ufo-withoutbase-leading-slashes",
+      "project": "ufo",
+      "fix_commit": "5cd9e67",
+      "fix_subject": "fix(withoutBase): collapse leading slashes (#335)",
+      "kind": "historical-defect",
+      "prompt": "In this project, withoutBase(input, base) strips a base path from an input path. After stripping, any run of leading slashes in the remainder must collapse to a single leading slash. Without this, an input such as '/legacy//evil.com' with base '/legacy' yields '//evil.com', which browsers treat as a protocol-relative URL and is a URL injection risk. Fix withoutBase so the result never begins with multiple slashes. Edit only src/utils.ts.",
+      "criteria_source": "upstream test/base.test.ts at 5cd9e67",
+      "requirements": [
+        {
+          "id": "collapse-leading-slashes",
+          "kind": "must-change",
+          "description": "withoutBase collapses leading slashes so a protocol-relative URL cannot be produced",
+          "module": "src/utils.ts",
+          "export": "withoutBase",
+          "cases": [
+            {
+              "args": [
+                "/legacy//evil.com",
+                "/legacy"
+              ],
+              "expected": "/evil.com"
+            },
+            {
+              "args": [
+                "/legacy//evil.com",
+                "/legacy/"
+              ],
+              "expected": "/evil.com"
+            },
+            {
+              "args": [
+                "/legacy///evil.com",
+                "/legacy"
+              ],
+              "expected": "/evil.com"
+            },
+            {
+              "args": [
+                "/legacy//",
+                "/legacy"
+              ],
+              "expected": "/"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ufo-false-prefix-match",
+      "project": "ufo",
+      "fix_commit": "eb29945",
+      "fix_subject": "fix(withBase, withoutBase): prevent false prefix matches (#313)",
+      "kind": "historical-defect",
+      "prompt": "In this project, withBase(input, base) and withoutBase(input, base) must only treat the base as a path prefix at a real path-segment boundary. A base of '/admin' or '/admin/' must NOT match an input such as '/admin-dashboard', because 'admin-dashboard' is a different path segment. Fix both functions so prefix matching is segment-aware: withBase('/admin-dashboard', '/admin/') should give '/admin/admin-dashboard', and withoutBase('/admin-dashboard', '/admin/') should leave the input unchanged. Edit only src/utils.ts.",
+      "criteria_source": "upstream test/base.test.ts at eb29945",
+      "requirements": [
+        {
+          "id": "withbase-segment-boundary",
+          "kind": "must-change",
+          "description": "withBase only skips a base that matches whole path segments",
+          "module": "src/utils.ts",
+          "export": "withBase",
+          "cases": [
+            {
+              "args": [
+                "/admin-dashboard",
+                "/admin/"
+              ],
+              "expected": "/admin/admin-dashboard"
+            },
+            {
+              "args": [
+                "/admin/admin-dashboard",
+                "/admin/"
+              ],
+              "expected": "/admin/admin-dashboard"
+            },
+            {
+              "args": [
+                "/admin-dashboard",
+                "/admin"
+              ],
+              "expected": "/admin/admin-dashboard"
+            }
+          ]
+        },
+        {
+          "id": "withoutbase-segment-boundary",
+          "kind": "must-change",
+          "description": "withoutBase only strips a base that matches whole path segments",
+          "module": "src/utils.ts",
+          "export": "withoutBase",
+          "cases": [
+            {
+              "args": [
+                "/admin/dashboard",
+                "/admin/"
+              ],
+              "expected": "/dashboard"
+            },
+            {
+              "args": [
+                "/admin-dashboard",
+                "/admin/"
+              ],
+              "expected": "/admin-dashboard"
+            },
+            {
+              "args": [
+                "/admin/admin-dashboard",
+                "/admin/"
+              ],
+              "expected": "/admin-dashboard"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scule-splitbycase-numbers",
+      "project": "scule",
+      "fix_commit": "9927800",
+      "fix_subject": "fix: ignore case changes for numbers",
+      "kind": "historical-defect",
+      "module": "src/index.ts",
+      "allowed_paths": [
+        "src/index.ts"
+      ],
+      "prompt": "In this project `splitByCase(str)` splits a string at the default separators ('-', '_', '/', '.') and at case transitions (lower->upper and upper->lower). Digits have no case, so a digit must NOT be treated as a case transition: 'foo123-bar' must split into ['foo123', 'bar'] and not break the digits away from the letters around them. Fix the splitting so numbers are ignored for case changes, while the existing splitting of letters is unchanged. Edit only src/index.ts.",
+      "criteria_source": "upstream test/scule.test.ts at 9927800",
+      "requirements": [
+        {
+          "id": "digits-are-not-case-changes",
+          "kind": "must-change",
+          "description": "splitByCase does not split at a digit boundary",
+          "module": "src/index.ts",
+          "export": "splitByCase",
+          "cases": [
+            {
+              "args": [
+                "foo123-bar"
+              ],
+              "expected": [
+                "foo123",
+                "bar"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "preserve-letter-splitting",
+          "kind": "must-preserve",
+          "description": "Existing letter-case and separator splitting is unchanged",
+          "module": "src/index.ts",
+          "export": "splitByCase",
+          "cases": [
+            {
+              "args": [
+                "FOOBar"
+              ],
+              "expected": [
+                "FOO",
+                "Bar"
+              ]
+            },
+            {
+              "args": [
+                "foo--bar-Baz"
+              ],
+              "expected": [
+                "foo",
+                "",
+                "bar",
+                "Baz"
+              ]
+            },
+            {
+              "args": [
+                "FooBarBaz"
+              ],
+              "expected": [
+                "Foo",
+                "Bar",
+                "Baz"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ufo-parsefilename-optional-opts",
+      "project": "ufo",
+      "fix_commit": "7959de5",
+      "fix_subject": "fix(parseFilename): use optional chaining to access `opts.strict` (#284)",
+      "kind": "historical-defect",
+      "module": "src/parse.ts",
+      "allowed_paths": [
+        "src/parse.ts"
+      ],
+      "prompt": "In this project `parseFilename(input, opts)` extracts the last path segment of a URL. The second argument is OPTIONAL and is documented as optional in the README, but today calling `parseFilename('/path/to/filename.ext')` with no second argument throws `TypeError: Cannot destructure property 'strict' of 'undefined'`, because the parameter is destructured unconditionally. Fix parseFilename so omitting `opts` behaves exactly like passing a non-strict options object (the plain filename is returned, including a leading dot for hidden files), while an explicitly supplied `opts.strict` keeps its current meaning. Edit only src/parse.ts.",
+      "criteria_source": "upstream test/parse.test.ts at 7959de5 (the added one-argument case), plus two further one-argument inputs exercising the same documented rule, disclosed here rather than hidden",
+      "requirements": [
+        {
+          "id": "opts-is-optional",
+          "kind": "must-change",
+          "description": "parseFilename works when the options argument is omitted",
+          "module": "src/parse.ts",
+          "export": "parseFilename",
+          "cases": [
+            {
+              "args": [
+                "/path/to/filename.ext"
+              ],
+              "expected": "filename.ext"
+            },
+            {
+              "args": [
+                "/path/to/.hidden-file"
+              ],
+              "expected": ".hidden-file"
+            },
+            {
+              "args": [
+                "https://example.com/a/b.tar.gz"
+              ],
+              "expected": "b.tar.gz"
+            }
+          ]
+        },
+        {
+          "id": "preserve-explicit-opts",
+          "kind": "must-preserve",
+          "description": "An explicitly supplied options object keeps its current behaviour",
+          "module": "src/parse.ts",
+          "export": "parseFilename",
+          "cases": [
+            {
+              "args": [
+                "/path/to/dir/../filename.ext",
+                true
+              ],
+              "expected": "filename.ext"
+            },
+            {
+              "args": [
+                "/path/to/filename.ext",
+                {}
+              ],
+              "expected": "filename.ext"
+            },
+            {
+              "args": [
+                "/path/to/filename.ext",
+                {
+                  "strict": false
+                }
+              ],
+              "expected": "filename.ext"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "entities-legacy-attribute-interrupted",
+      "project": "entities",
+      "fix_commit": "cec1fd8",
+      "fix_subject": "fix(decode): fix legacy entities in attributes regression (#2213)",
+      "kind": "historical-defect",
+      "module": "src/decode.ts",
+      "allowed_paths": [
+        "src/decode.ts"
+      ],
+      "approved_by": "upstream src/decode.spec.ts at cec1fd8 (issues #2208/#2213)",
+      "prompt": "In this project `decodeHTMLAttribute(text)` decodes HTML entities inside an ATTRIBUTE value, following the HTML standard. In attribute mode a legacy (semicolon-less) entity such as `&not` must NOT be decoded when the match is interrupted by descending into a longer entity name: in `&notin\\0;` and `&notin<` the decoder matches `&not` and then descends into `&notin`, and per the standard that descent invalidates the legacy match in attribute mode, so the text must be left exactly as it is. Today it is wrongly decoded to '¬in\\0;' and '¬in<'. Fix decodeHTMLAttribute so an interrupted legacy match is not committed in attribute mode, while every other decoding behaviour is unchanged — in particular `&not;` still decodes to '¬', `&notin;` to '∉', `&notP` and `&not3` stay literal, and `&not` in TEXT mode still decodes. Edit only src/decode.ts.",
+      "criteria_source": "upstream src/decode.spec.ts at cec1fd8 — the fix added 42 lines and removed none, so every expected value below is an assertion the project itself introduced, measured by executing the real code at both revisions",
+      "requirements": [
+        {
+          "id": "interrupted-legacy-match-not-committed",
+          "kind": "must-change",
+          "description": "A legacy entity match interrupted by descending into a longer entity is not decoded in attribute mode",
+          "module": "src/decode.ts",
+          "export": "decodeHTMLAttribute",
+          "cases": [
+            {
+              "args": [
+                "&notin\u0000;"
+              ],
+              "expected": "&notin\u0000;"
+            },
+            {
+              "args": [
+                "&notin<"
+              ],
+              "expected": "&notin<"
+            }
+          ]
+        },
+        {
+          "id": "preserve-attribute-decoding",
+          "kind": "must-preserve",
+          "description": "Every other attribute-mode decoding behaviour is unchanged",
+          "module": "src/decode.ts",
+          "export": "decodeHTMLAttribute",
+          "cases": [
+            {
+              "args": [
+                "&notP"
+              ],
+              "expected": "&notP"
+            },
+            {
+              "args": [
+                "&not3"
+              ],
+              "expected": "&not3"
+            },
+            {
+              "args": [
+                "&not;"
+              ],
+              "expected": "¬"
+            },
+            {
+              "args": [
+                "&notin;"
+              ],
+              "expected": "∉"
+            },
+            {
+              "args": [
+                "&amp;"
+              ],
+              "expected": "&"
+            },
+            {
+              "args": [
+                "&lt;"
+              ],
+              "expected": "<"
+            },
+            {
+              "args": [
+                "&amp"
+              ],
+              "expected": "&"
+            },
+            {
+              "args": [
+                "a &not b"
+              ],
+              "expected": "a ¬ b"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "contracts": {
+    "scule-custom-separator-split": {
+      "schemaVersion": 1,
+      "objective": "scule: fix(isUppercase): assume characters lowercase by default (#71)",
+      "approvedBy": "upstream test/scule.test.ts at 57cfd15",
+      "allowedPaths": [
+        "src/index.ts"
+      ],
+      "requirements": [
+        {
+          "id": "custom-separator-no-split",
+          "kind": "must-change",
+          "description": "A string with no listed separator and no case boundary is a single segment",
+          "module": "src/index.ts",
+          "export": "splitByCase",
+          "cases": [
+            {
+              "args": [
+                "new-name-value",
+                [
+                  "_"
+                ]
+              ],
+              "expected": [
+                "new-name-value"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "preserve-default-splitting",
+          "kind": "must-preserve",
+          "description": "Default splitting behaviour is unchanged",
+          "module": "src/index.ts",
+          "export": "splitByCase",
+          "cases": [
+            {
+              "args": [
+                "FooBARb"
+              ],
+              "expected": [
+                "Foo",
+                "BA",
+                "Rb"
+              ]
+            },
+            {
+              "args": [
+                "FOO_BAR"
+              ],
+              "expected": [
+                "FOO",
+                "BAR"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "ufo-withoutbase-leading-slashes": {
+      "schemaVersion": 1,
+      "objective": "ufo: fix(withoutBase): collapse leading slashes (#335)",
+      "approvedBy": "upstream test/base.test.ts at 5cd9e67",
+      "allowedPaths": [
+        "src/utils.ts"
+      ],
+      "requirements": [
+        {
+          "id": "collapse-leading-slashes",
+          "kind": "must-change",
+          "description": "withoutBase collapses leading slashes so a protocol-relative URL cannot be produced",
+          "module": "src/utils.ts",
+          "export": "withoutBase",
+          "cases": [
+            {
+              "args": [
+                "/legacy//evil.com",
+                "/legacy"
+              ],
+              "expected": "/evil.com"
+            },
+            {
+              "args": [
+                "/legacy//evil.com",
+                "/legacy/"
+              ],
+              "expected": "/evil.com"
+            },
+            {
+              "args": [
+                "/legacy///evil.com",
+                "/legacy"
+              ],
+              "expected": "/evil.com"
+            },
+            {
+              "args": [
+                "/legacy//",
+                "/legacy"
+              ],
+              "expected": "/"
+            }
+          ]
+        }
+      ]
+    },
+    "ufo-false-prefix-match": {
+      "schemaVersion": 1,
+      "objective": "ufo: fix(withBase, withoutBase): prevent false prefix matches (#313)",
+      "approvedBy": "upstream test/base.test.ts at eb29945",
+      "allowedPaths": [
+        "src/utils.ts"
+      ],
+      "requirements": [
+        {
+          "id": "withbase-segment-boundary",
+          "kind": "must-change",
+          "description": "withBase only skips a base that matches whole path segments",
+          "module": "src/utils.ts",
+          "export": "withBase",
+          "cases": [
+            {
+              "args": [
+                "/admin-dashboard",
+                "/admin/"
+              ],
+              "expected": "/admin/admin-dashboard"
+            },
+            {
+              "args": [
+                "/admin/admin-dashboard",
+                "/admin/"
+              ],
+              "expected": "/admin/admin-dashboard"
+            },
+            {
+              "args": [
+                "/admin-dashboard",
+                "/admin"
+              ],
+              "expected": "/admin/admin-dashboard"
+            }
+          ]
+        },
+        {
+          "id": "withoutbase-segment-boundary",
+          "kind": "must-change",
+          "description": "withoutBase only strips a base that matches whole path segments",
+          "module": "src/utils.ts",
+          "export": "withoutBase",
+          "cases": [
+            {
+              "args": [
+                "/admin/dashboard",
+                "/admin/"
+              ],
+              "expected": "/dashboard"
+            },
+            {
+              "args": [
+                "/admin-dashboard",
+                "/admin/"
+              ],
+              "expected": "/admin-dashboard"
+            },
+            {
+              "args": [
+                "/admin/admin-dashboard",
+                "/admin/"
+              ],
+              "expected": "/admin-dashboard"
+            }
+          ]
+        }
+      ]
+    },
+    "scule-splitbycase-numbers": {
+      "schemaVersion": 1,
+      "objective": "scule: fix: ignore case changes for numbers",
+      "approvedBy": "upstream test/scule.test.ts at 9927800",
+      "allowedPaths": [
+        "src/index.ts"
+      ],
+      "requirements": [
+        {
+          "id": "digits-are-not-case-changes",
+          "kind": "must-change",
+          "description": "splitByCase does not split at a digit boundary",
+          "module": "src/index.ts",
+          "export": "splitByCase",
+          "cases": [
+            {
+              "args": [
+                "foo123-bar"
+              ],
+              "expected": [
+                "foo123",
+                "bar"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "preserve-letter-splitting",
+          "kind": "must-preserve",
+          "description": "Existing letter-case and separator splitting is unchanged",
+          "module": "src/index.ts",
+          "export": "splitByCase",
+          "cases": [
+            {
+              "args": [
+                "FOOBar"
+              ],
+              "expected": [
+                "FOO",
+                "Bar"
+              ]
+            },
+            {
+              "args": [
+                "foo--bar-Baz"
+              ],
+              "expected": [
+                "foo",
+                "",
+                "bar",
+                "Baz"
+              ]
+            },
+            {
+              "args": [
+                "FooBarBaz"
+              ],
+              "expected": [
+                "Foo",
+                "Bar",
+                "Baz"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "ufo-parsefilename-optional-opts": {
+      "schemaVersion": 1,
+      "objective": "ufo: fix(parseFilename): use optional chaining to access `opts.strict` (#284)",
+      "approvedBy": "upstream test/parse.test.ts at 7959de5 (the added one-argument case), plus two further one-argument inputs exercising the same documented rule, disclosed here rather than hidden",
+      "allowedPaths": [
+        "src/parse.ts"
+      ],
+      "requirements": [
+        {
+          "id": "opts-is-optional",
+          "kind": "must-change",
+          "description": "parseFilename works when the options argument is omitted",
+          "module": "src/parse.ts",
+          "export": "parseFilename",
+          "cases": [
+            {
+              "args": [
+                "/path/to/filename.ext"
+              ],
+              "expected": "filename.ext"
+            },
+            {
+              "args": [
+                "/path/to/.hidden-file"
+              ],
+              "expected": ".hidden-file"
+            },
+            {
+              "args": [
+                "https://example.com/a/b.tar.gz"
+              ],
+              "expected": "b.tar.gz"
+            }
+          ]
+        },
+        {
+          "id": "preserve-explicit-opts",
+          "kind": "must-preserve",
+          "description": "An explicitly supplied options object keeps its current behaviour",
+          "module": "src/parse.ts",
+          "export": "parseFilename",
+          "cases": [
+            {
+              "args": [
+                "/path/to/dir/../filename.ext",
+                true
+              ],
+              "expected": "filename.ext"
+            },
+            {
+              "args": [
+                "/path/to/filename.ext",
+                {}
+              ],
+              "expected": "filename.ext"
+            },
+            {
+              "args": [
+                "/path/to/filename.ext",
+                {
+                  "strict": false
+                }
+              ],
+              "expected": "filename.ext"
+            }
+          ]
+        }
+      ]
+    },
+    "entities-legacy-attribute-interrupted": {
+      "schemaVersion": 1,
+      "objective": "entities: fix(decode): fix legacy entities in attributes regression (#2213)",
+      "approvedBy": "upstream src/decode.spec.ts at cec1fd8 (issues #2208/#2213)",
+      "allowedPaths": [
+        "src/decode.ts"
+      ],
+      "requirements": [
+        {
+          "id": "interrupted-legacy-match-not-committed",
+          "kind": "must-change",
+          "description": "A legacy entity match interrupted by descending into a longer entity is not decoded in attribute mode",
+          "module": "src/decode.ts",
+          "export": "decodeHTMLAttribute",
+          "cases": [
+            {
+              "args": [
+                "&notin\u0000;"
+              ],
+              "expected": "&notin\u0000;"
+            },
+            {
+              "args": [
+                "&notin<"
+              ],
+              "expected": "&notin<"
+            }
+          ]
+        },
+        {
+          "id": "preserve-attribute-decoding",
+          "kind": "must-preserve",
+          "description": "Every other attribute-mode decoding behaviour is unchanged",
+          "module": "src/decode.ts",
+          "export": "decodeHTMLAttribute",
+          "cases": [
+            {
+              "args": [
+                "&notP"
+              ],
+              "expected": "&notP"
+            },
+            {
+              "args": [
+                "&not3"
+              ],
+              "expected": "&not3"
+            },
+            {
+              "args": [
+                "&not;"
+              ],
+              "expected": "¬"
+            },
+            {
+              "args": [
+                "&notin;"
+              ],
+              "expected": "∉"
+            },
+            {
+              "args": [
+                "&amp;"
+              ],
+              "expected": "&"
+            },
+            {
+              "args": [
+                "&lt;"
+              ],
+              "expected": "<"
+            },
+            {
+              "args": [
+                "&amp"
+              ],
+              "expected": "&"
+            },
+            {
+              "args": [
+                "a &not b"
+              ],
+              "expected": "a ¬ b"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "pre_freeze_validation": [
+    {
+      "task": "scule-custom-separator-split",
+      "baseline": {
+        "verdict": "CONTRADICTED",
+        "ok": false,
+        "receipt": "5436f2a7c26f68a57b2b64bad41d802f63a87922edc047304a6e0b2417ee5fe5",
+        "requirements": {
+          "custom-separator-no-split": "CONTRADICTED",
+          "preserve-default-splitting": "VERIFIED"
+        },
+        "reasons": [
+          "requirement 'custom-separator-no-split' is CONTRADICTED"
+        ],
+        "counterexample": {
+          "requirement_id": "custom-separator-no-split",
+          "invariant": "A string with no listed separator and no case boundary is a single segment",
+          "input": [
+            "new-name-value",
+            [
+              "_"
+            ]
+          ],
+          "expected": [
+            "new-name-value"
+          ],
+          "observed": [
+            "new",
+            "-name",
+            "-value"
+          ],
+          "detail": "Approved must-change requirement conflicts with the observed result.",
+          "shrunk": false
+        },
+        "integrity": {
+          "pointer_before": null,
+          "pointer_after": "5436f2a7c26f68a57b2b64bad41d802f63a87922edc047304a6e0b2417ee5fe5",
+          "fresh_receipt": true,
+          "receipt_content_address_ok": true,
+          "referenced_objects_ok": true,
+          "candidate_identity": {
+            "files_checked": 19,
+            "files_hash_matched": [
+              ".editorconfig",
+              ".eslintignore",
+              ".eslintrc",
+              ".github/banner.svg",
+              ".github/workflows/autofix.yml",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              ".prettierrc",
+              "CHANGELOG.md",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "src/index.ts",
+              "src/types.ts",
+              "test/scule.test.ts",
+              "test/types.test-d.ts",
+              "tsconfig.json"
+            ],
+            "files_mismatched": [],
+            "files_missing": []
+          },
+          "snapshot_git_head_matches_receipt": true,
+          "change_scope": {
+            "allowed_paths": [
+              "src/index.ts"
+            ],
+            "changes": [],
+            "out_of_scope": [],
+            "unauthorised_classification": [],
+            "test_changes": [],
+            "dependency_changes": []
+          },
+          "exit_code": 1,
+          "attempt_id": "baseline-64d1e2"
+        }
+      },
+      "baseline_ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m57 passed\u001b[39m\u001b[22m\u001b[90m (57)\u001b[39m"
+      },
+      "fix": {
+        "verdict": "VERIFIED",
+        "ok": true,
+        "receipt": "c509bda32e11a1df2712527c91d8c9508ac9d3c1b905257bc3bff3bfb164c07e",
+        "requirements": {
+          "custom-separator-no-split": "VERIFIED",
+          "preserve-default-splitting": "VERIFIED"
+        },
+        "reasons": [],
+        "counterexample": null,
+        "integrity": {
+          "pointer_before": null,
+          "pointer_after": "c509bda32e11a1df2712527c91d8c9508ac9d3c1b905257bc3bff3bfb164c07e",
+          "fresh_receipt": true,
+          "receipt_content_address_ok": true,
+          "referenced_objects_ok": true,
+          "candidate_identity": {
+            "files_checked": 19,
+            "files_hash_matched": [
+              ".editorconfig",
+              ".eslintignore",
+              ".eslintrc",
+              ".github/banner.svg",
+              ".github/workflows/autofix.yml",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              ".prettierrc",
+              "CHANGELOG.md",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "src/index.ts",
+              "src/types.ts",
+              "test/scule.test.ts",
+              "test/types.test-d.ts",
+              "tsconfig.json"
+            ],
+            "files_mismatched": [],
+            "files_missing": []
+          },
+          "snapshot_git_head_matches_receipt": true,
+          "change_scope": {
+            "allowed_paths": [
+              "src/index.ts"
+            ],
+            "changes": [],
+            "out_of_scope": [],
+            "unauthorised_classification": [],
+            "test_changes": [],
+            "dependency_changes": []
+          },
+          "exit_code": 0,
+          "attempt_id": "fix-96551b"
+        }
+      },
+      "fix_ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m58 passed\u001b[39m\u001b[22m\u001b[90m (58)\u001b[39m"
+      },
+      "fix_src_only": {
+        "changed": [
+          "src/index.ts"
+        ],
+        "ordinary_tests": {
+          "ran": true,
+          "passed": true,
+          "runner": "npm-test",
+          "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m57 passed\u001b[39m\u001b[22m\u001b[90m (57)\u001b[39m"
+        }
+      },
+      "valid": true
+    },
+    {
+      "task": "ufo-withoutbase-leading-slashes",
+      "baseline": {
+        "verdict": "CONTRADICTED",
+        "ok": false,
+        "receipt": "e3363aa5f3c4bd11f4bd20348ea2d2d212569dbafaf940ee173b3c026eb24d40",
+        "requirements": {
+          "collapse-leading-slashes": "CONTRADICTED"
+        },
+        "reasons": [
+          "requirement 'collapse-leading-slashes' is CONTRADICTED"
+        ],
+        "counterexample": {
+          "requirement_id": "collapse-leading-slashes",
+          "invariant": "withoutBase collapses leading slashes so a protocol-relative URL cannot be produced",
+          "input": [
+            "/legacy//evil.com",
+            "/legacy"
+          ],
+          "expected": "/evil.com",
+          "observed": "//evil.com",
+          "detail": "Approved must-change requirement conflicts with the observed result.",
+          "shrunk": false
+        },
+        "integrity": {
+          "pointer_before": null,
+          "pointer_after": "e3363aa5f3c4bd11f4bd20348ea2d2d212569dbafaf940ee173b3c026eb24d40",
+          "fresh_receipt": true,
+          "receipt_content_address_ok": true,
+          "referenced_objects_ok": true,
+          "candidate_identity": {
+            "files_checked": 39,
+            "files_hash_matched": [
+              ".editorconfig",
+              ".github/banner.svg",
+              ".github/workflows/autofix.yml",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              ".prettierrc",
+              "CHANGELOG.md",
+              "eslint.config.mjs",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "SECURITY.md",
+              "src/encoding.ts",
+              "src/index.ts",
+              "src/parse.ts",
+              "src/punycode.ts",
+              "src/query.ts",
+              "src/url.ts",
+              "src/utils.ts",
+              "test/base.test.ts",
+              "test/double-slash.test.ts",
+              "test/encoding.test.ts",
+              "test/fixture/README.md",
+              "test/fixture/toascii.json",
+              "test/fixture/urltestdata.json",
+              "test/is-same.test.ts",
+              "test/join.test.ts",
+              "test/normalize.test.ts",
+              "test/parse.test.ts",
+              "test/punycode.test.ts",
+              "test/query.test.ts",
+              "test/resolve.test.ts",
+              "test/trailing-slash.test.ts",
+              "test/types.test-d.ts",
+              "test/url.test.ts",
+              "test/utilities.test.ts",
+              "tsconfig.json"
+            ],
+            "files_mismatched": [],
+            "files_missing": []
+          },
+          "snapshot_git_head_matches_receipt": true,
+          "change_scope": {
+            "allowed_paths": [
+              "src/utils.ts"
+            ],
+            "changes": [],
+            "out_of_scope": [],
+            "unauthorised_classification": [],
+            "test_changes": [],
+            "dependency_changes": []
+          },
+          "exit_code": 1,
+          "attempt_id": "baseline-68730a"
+        }
+      },
+      "baseline_ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m485 passed\u001b[39m\u001b[22m\u001b[90m (485)\u001b[39m"
+      },
+      "fix": {
+        "verdict": "VERIFIED",
+        "ok": true,
+        "receipt": "e813b0c19bdad9ce260c1cf1eecba33b21420dfb233db12c1421a19491bb9218",
+        "requirements": {
+          "collapse-leading-slashes": "VERIFIED"
+        },
+        "reasons": [],
+        "counterexample": null,
+        "integrity": {
+          "pointer_before": null,
+          "pointer_after": "e813b0c19bdad9ce260c1cf1eecba33b21420dfb233db12c1421a19491bb9218",
+          "fresh_receipt": true,
+          "receipt_content_address_ok": true,
+          "referenced_objects_ok": true,
+          "candidate_identity": {
+            "files_checked": 39,
+            "files_hash_matched": [
+              ".editorconfig",
+              ".github/banner.svg",
+              ".github/workflows/autofix.yml",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              ".prettierrc",
+              "CHANGELOG.md",
+              "eslint.config.mjs",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "SECURITY.md",
+              "src/encoding.ts",
+              "src/index.ts",
+              "src/parse.ts",
+              "src/punycode.ts",
+              "src/query.ts",
+              "src/url.ts",
+              "src/utils.ts",
+              "test/base.test.ts",
+              "test/double-slash.test.ts",
+              "test/encoding.test.ts",
+              "test/fixture/README.md",
+              "test/fixture/toascii.json",
+              "test/fixture/urltestdata.json",
+              "test/is-same.test.ts",
+              "test/join.test.ts",
+              "test/normalize.test.ts",
+              "test/parse.test.ts",
+              "test/punycode.test.ts",
+              "test/query.test.ts",
+              "test/resolve.test.ts",
+              "test/trailing-slash.test.ts",
+              "test/types.test-d.ts",
+              "test/url.test.ts",
+              "test/utilities.test.ts",
+              "tsconfig.json"
+            ],
+            "files_mismatched": [],
+            "files_missing": []
+          },
+          "snapshot_git_head_matches_receipt": true,
+          "change_scope": {
+            "allowed_paths": [
+              "src/utils.ts"
+            ],
+            "changes": [],
+            "out_of_scope": [],
+            "unauthorised_classification": [],
+            "test_changes": [],
+            "dependency_changes": []
+          },
+          "exit_code": 0,
+          "attempt_id": "fix-250191"
+        }
+      },
+      "fix_ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m489 passed\u001b[39m\u001b[22m\u001b[90m (489)\u001b[39m"
+      },
+      "fix_src_only": {
+        "changed": [
+          "src/utils.ts"
+        ],
+        "ordinary_tests": {
+          "ran": true,
+          "passed": true,
+          "runner": "npm-test",
+          "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m485 passed\u001b[39m\u001b[22m\u001b[90m (485)\u001b[39m"
+        }
+      },
+      "valid": true
+    },
+    {
+      "task": "ufo-false-prefix-match",
+      "baseline": {
+        "verdict": "CONTRADICTED",
+        "ok": false,
+        "receipt": "367818320ceb16c125f9e77dd4f3c0584655bcc10964effbf999774b454ce722",
+        "requirements": {
+          "withbase-segment-boundary": "CONTRADICTED",
+          "withoutbase-segment-boundary": "CONTRADICTED"
+        },
+        "reasons": [
+          "requirement 'withbase-segment-boundary' is CONTRADICTED",
+          "requirement 'withoutbase-segment-boundary' is CONTRADICTED"
+        ],
+        "counterexample": {
+          "requirement_id": "withbase-segment-boundary",
+          "invariant": "withBase only skips a base that matches whole path segments",
+          "input": [
+            "/admin-dashboard",
+            "/admin/"
+          ],
+          "expected": "/admin/admin-dashboard",
+          "observed": "/admin-dashboard",
+          "detail": "Approved must-change requirement conflicts with the observed result.",
+          "shrunk": false
+        },
+        "integrity": {
+          "pointer_before": null,
+          "pointer_after": "367818320ceb16c125f9e77dd4f3c0584655bcc10964effbf999774b454ce722",
+          "fresh_receipt": true,
+          "receipt_content_address_ok": true,
+          "referenced_objects_ok": true,
+          "candidate_identity": {
+            "files_checked": 39,
+            "files_hash_matched": [
+              ".editorconfig",
+              ".github/banner.svg",
+              ".github/workflows/autofix.yml",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              ".prettierrc",
+              "CHANGELOG.md",
+              "eslint.config.mjs",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "SECURITY.md",
+              "src/encoding.ts",
+              "src/index.ts",
+              "src/parse.ts",
+              "src/punycode.ts",
+              "src/query.ts",
+              "src/url.ts",
+              "src/utils.ts",
+              "test/base.test.ts",
+              "test/double-slash.test.ts",
+              "test/encoding.test.ts",
+              "test/fixture/README.md",
+              "test/fixture/toascii.json",
+              "test/fixture/urltestdata.json",
+              "test/is-same.test.ts",
+              "test/join.test.ts",
+              "test/normalize.test.ts",
+              "test/parse.test.ts",
+              "test/punycode.test.ts",
+              "test/query.test.ts",
+              "test/resolve.test.ts",
+              "test/trailing-slash.test.ts",
+              "test/types.test-d.ts",
+              "test/url.test.ts",
+              "test/utilities.test.ts",
+              "tsconfig.json"
+            ],
+            "files_mismatched": [],
+            "files_missing": []
+          },
+          "snapshot_git_head_matches_receipt": true,
+          "change_scope": {
+            "allowed_paths": [
+              "src/utils.ts"
+            ],
+            "changes": [],
+            "out_of_scope": [],
+            "unauthorised_classification": [],
+            "test_changes": [],
+            "dependency_changes": []
+          },
+          "exit_code": 1,
+          "attempt_id": "baseline-cf1745"
+        }
+      },
+      "baseline_ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m477 passed\u001b[39m\u001b[22m\u001b[90m (477)\u001b[39m"
+      },
+      "fix": {
+        "verdict": "VERIFIED",
+        "ok": true,
+        "receipt": "74fabbe83c58dd9bbe19427ba9da1f40b9c22e26c9fd00d15b94bf14d7a8c642",
+        "requirements": {
+          "withbase-segment-boundary": "VERIFIED",
+          "withoutbase-segment-boundary": "VERIFIED"
+        },
+        "reasons": [],
+        "counterexample": null,
+        "integrity": {
+          "pointer_before": null,
+          "pointer_after": "74fabbe83c58dd9bbe19427ba9da1f40b9c22e26c9fd00d15b94bf14d7a8c642",
+          "fresh_receipt": true,
+          "receipt_content_address_ok": true,
+          "referenced_objects_ok": true,
+          "candidate_identity": {
+            "files_checked": 39,
+            "files_hash_matched": [
+              ".editorconfig",
+              ".github/banner.svg",
+              ".github/workflows/autofix.yml",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              ".prettierrc",
+              "CHANGELOG.md",
+              "eslint.config.mjs",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "SECURITY.md",
+              "src/encoding.ts",
+              "src/index.ts",
+              "src/parse.ts",
+              "src/punycode.ts",
+              "src/query.ts",
+              "src/url.ts",
+              "src/utils.ts",
+              "test/base.test.ts",
+              "test/double-slash.test.ts",
+              "test/encoding.test.ts",
+              "test/fixture/README.md",
+              "test/fixture/toascii.json",
+              "test/fixture/urltestdata.json",
+              "test/is-same.test.ts",
+              "test/join.test.ts",
+              "test/normalize.test.ts",
+              "test/parse.test.ts",
+              "test/punycode.test.ts",
+              "test/query.test.ts",
+              "test/resolve.test.ts",
+              "test/trailing-slash.test.ts",
+              "test/types.test-d.ts",
+              "test/url.test.ts",
+              "test/utilities.test.ts",
+              "tsconfig.json"
+            ],
+            "files_mismatched": [],
+            "files_missing": []
+          },
+          "snapshot_git_head_matches_receipt": true,
+          "change_scope": {
+            "allowed_paths": [
+              "src/utils.ts"
+            ],
+            "changes": [],
+            "out_of_scope": [],
+            "unauthorised_classification": [],
+            "test_changes": [],
+            "dependency_changes": []
+          },
+          "exit_code": 0,
+          "attempt_id": "fix-c066be"
+        }
+      },
+      "fix_ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m485 passed\u001b[39m\u001b[22m\u001b[90m (485)\u001b[39m"
+      },
+      "fix_src_only": {
+        "changed": [
+          "src/utils.ts"
+        ],
+        "ordinary_tests": {
+          "ran": true,
+          "passed": true,
+          "runner": "npm-test",
+          "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m477 passed\u001b[39m\u001b[22m\u001b[90m (477)\u001b[39m"
+        }
+      },
+      "valid": true
+    },
+    {
+      "task": "scule-splitbycase-numbers",
+      "baseline": {
+        "verdict": "CONTRADICTED",
+        "ok": false,
+        "receipt": "e760e15d7e9d18a22bff5259a585f173a6f7b1adbdbfdd8caf0ed8758dc0b1f6",
+        "requirements": {
+          "digits-are-not-case-changes": "CONTRADICTED",
+          "preserve-letter-splitting": "VERIFIED"
+        },
+        "reasons": [
+          "requirement 'digits-are-not-case-changes' is CONTRADICTED"
+        ],
+        "counterexample": {
+          "requirement_id": "digits-are-not-case-changes",
+          "invariant": "splitByCase does not split at a digit boundary",
+          "input": [
+            "foo123-bar"
+          ],
+          "expected": [
+            "foo123",
+            "bar"
+          ],
+          "observed": [
+            "foo",
+            "123",
+            "bar"
+          ],
+          "detail": "Approved must-change requirement conflicts with the observed result.",
+          "shrunk": false
+        },
+        "integrity": {
+          "pointer_before": null,
+          "pointer_after": "e760e15d7e9d18a22bff5259a585f173a6f7b1adbdbfdd8caf0ed8758dc0b1f6",
+          "fresh_receipt": true,
+          "receipt_content_address_ok": true,
+          "referenced_objects_ok": true,
+          "candidate_identity": {
+            "files_checked": 15,
+            "files_hash_matched": [
+              ".editorconfig",
+              ".eslintignore",
+              ".eslintrc",
+              ".github/banner.svg",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              "CHANGELOG.md",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "src/index.ts",
+              "test/scule.test.ts",
+              "tsconfig.json"
+            ],
+            "files_mismatched": [],
+            "files_missing": []
+          },
+          "snapshot_git_head_matches_receipt": true,
+          "change_scope": {
+            "allowed_paths": [
+              "src/index.ts"
+            ],
+            "changes": [],
+            "out_of_scope": [],
+            "unauthorised_classification": [],
+            "test_changes": [],
+            "dependency_changes": []
+          },
+          "exit_code": 1,
+          "attempt_id": "baseline-1a23d1"
+        }
+      },
+      "baseline_ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m27 passed\u001b[39m\u001b[22m\u001b[90m (27)\u001b[39m"
+      },
+      "fix": {
+        "verdict": "VERIFIED",
+        "ok": true,
+        "receipt": "82d4e4fad29402acc8e80566ed52e602b4e0ee77485508697dff9cf4c6b77aef",
+        "requirements": {
+          "digits-are-not-case-changes": "VERIFIED",
+          "preserve-letter-splitting": "VERIFIED"
+        },
+        "reasons": [],
+        "counterexample": null,
+        "integrity": {
+          "pointer_before": null,
+          "pointer_after": "82d4e4fad29402acc8e80566ed52e602b4e0ee77485508697dff9cf4c6b77aef",
+          "fresh_receipt": true,
+          "receipt_content_address_ok": true,
+          "referenced_objects_ok": true,
+          "candidate_identity": {
+            "files_checked": 15,
+            "files_hash_matched": [
+              ".editorconfig",
+              ".eslintignore",
+              ".eslintrc",
+              ".github/banner.svg",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              "CHANGELOG.md",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "src/index.ts",
+              "test/scule.test.ts",
+              "tsconfig.json"
+            ],
+            "files_mismatched": [],
+            "files_missing": []
+          },
+          "snapshot_git_head_matches_receipt": true,
+          "change_scope": {
+            "allowed_paths": [
+              "src/index.ts"
+            ],
+            "changes": [],
+            "out_of_scope": [],
+            "unauthorised_classification": [],
+            "test_changes": [],
+            "dependency_changes": []
+          },
+          "exit_code": 0,
+          "attempt_id": "fix-cc8688"
+        }
+      },
+      "fix_ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m28 passed\u001b[39m\u001b[22m\u001b[90m (28)\u001b[39m"
+      },
+      "fix_src_only": {
+        "changed": [
+          "src/index.ts"
+        ],
+        "ordinary_tests": {
+          "ran": true,
+          "passed": true,
+          "runner": "npm-test",
+          "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m27 passed\u001b[39m\u001b[22m\u001b[90m (27)\u001b[39m"
+        }
+      },
+      "valid": true
+    },
+    {
+      "task": "ufo-parsefilename-optional-opts",
+      "baseline": {
+        "verdict": "CONTRADICTED",
+        "ok": false,
+        "receipt": "6b3d62ca9edaff592eece0425e584cccaedffffaa5fd5225103a67e85f224928",
+        "requirements": {
+          "opts-is-optional": "CONTRADICTED",
+          "preserve-explicit-opts": "VERIFIED"
+        },
+        "reasons": [
+          "requirement 'opts-is-optional' is CONTRADICTED"
+        ],
+        "counterexample": {
+          "requirement_id": "opts-is-optional",
+          "invariant": "parseFilename works when the options argument is omitted",
+          "input": [
+            "/path/to/filename.ext"
+          ],
+          "expected": "filename.ext",
+          "observed": {
+            "error": "TypeError: Cannot destructure property 'strict' of 'undefined' as it is undefined."
+          },
+          "detail": "Approved must-change requirement conflicts with the observed result.",
+          "shrunk": false
+        },
+        "integrity": {
+          "pointer_before": null,
+          "pointer_after": "6b3d62ca9edaff592eece0425e584cccaedffffaa5fd5225103a67e85f224928",
+          "fresh_receipt": true,
+          "receipt_content_address_ok": true,
+          "referenced_objects_ok": true,
+          "candidate_identity": {
+            "files_checked": 39,
+            "files_hash_matched": [
+              ".editorconfig",
+              ".github/banner.svg",
+              ".github/workflows/autofix.yml",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              ".prettierrc",
+              "CHANGELOG.md",
+              "eslint.config.mjs",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "SECURITY.md",
+              "src/encoding.ts",
+              "src/index.ts",
+              "src/parse.ts",
+              "src/punycode.ts",
+              "src/query.ts",
+              "src/url.ts",
+              "src/utils.ts",
+              "test/base.test.ts",
+              "test/double-slash.test.ts",
+              "test/encoding.test.ts",
+              "test/fixture/README.md",
+              "test/fixture/toascii.json",
+              "test/fixture/urltestdata.json",
+              "test/is-same.test.ts",
+              "test/join.test.ts",
+              "test/normalize.test.ts",
+              "test/parse.test.ts",
+              "test/punycode.test.ts",
+              "test/query.test.ts",
+              "test/resolve.test.ts",
+              "test/trailing-slash.test.ts",
+              "test/types.test-d.ts",
+              "test/url.test.ts",
+              "test/utilities.test.ts",
+              "tsconfig.json"
+            ],
+            "files_mismatched": [],
+            "files_missing": []
+          },
+          "snapshot_git_head_matches_receipt": true,
+          "change_scope": {
+            "allowed_paths": [
+              "src/parse.ts"
+            ],
+            "changes": [],
+            "out_of_scope": [],
+            "unauthorised_classification": [],
+            "test_changes": [],
+            "dependency_changes": []
+          },
+          "exit_code": 1,
+          "attempt_id": "baseline-93d1ff"
+        }
+      },
+      "baseline_ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m473 passed\u001b[39m\u001b[22m\u001b[90m (473)\u001b[39m"
+      },
+      "fix": {
+        "verdict": "VERIFIED",
+        "ok": true,
+        "receipt": "45f353f9560c10789d8c2910b5a5c39bb0725dbfac7f2d560bcd977757f001c6",
+        "requirements": {
+          "opts-is-optional": "VERIFIED",
+          "preserve-explicit-opts": "VERIFIED"
+        },
+        "reasons": [],
+        "counterexample": null,
+        "integrity": {
+          "pointer_before": null,
+          "pointer_after": "45f353f9560c10789d8c2910b5a5c39bb0725dbfac7f2d560bcd977757f001c6",
+          "fresh_receipt": true,
+          "receipt_content_address_ok": true,
+          "referenced_objects_ok": true,
+          "candidate_identity": {
+            "files_checked": 39,
+            "files_hash_matched": [
+              ".editorconfig",
+              ".github/banner.svg",
+              ".github/workflows/autofix.yml",
+              ".github/workflows/ci.yml",
+              ".gitignore",
+              ".prettierrc",
+              "CHANGELOG.md",
+              "eslint.config.mjs",
+              "LICENSE",
+              "package.json",
+              "pnpm-lock.yaml",
+              "README.md",
+              "renovate.json",
+              "SECURITY.md",
+              "src/encoding.ts",
+              "src/index.ts",
+              "src/parse.ts",
+              "src/punycode.ts",
+              "src/query.ts",
+              "src/url.ts",
+              "src/utils.ts",
+              "test/base.test.ts",
+              "test/double-slash.test.ts",
+              "test/encoding.test.ts",
+              "test/fixture/README.md",
+              "test/fixture/toascii.json",
+              "test/fixture/urltestdata.json",
+              "test/is-same.test.ts",
+              "test/join.test.ts",
+              "test/normalize.test.ts",
+              "test/parse.test.ts",
+              "test/punycode.test.ts",
+              "test/query.test.ts",
+              "test/resolve.test.ts",
+              "test/trailing-slash.test.ts",
+              "test/types.test-d.ts",
+              "test/url.test.ts",
+              "test/utilities.test.ts",
+              "tsconfig.json"
+            ],
+            "files_mismatched": [],
+            "files_missing": []
+          },
+          "snapshot_git_head_matches_receipt": true,
+          "change_scope": {
+            "allowed_paths": [
+              "src/parse.ts"
+            ],
+            "changes": [],
+            "out_of_scope": [],
+            "unauthorised_classification": [],
+            "test_changes": [],
+            "dependency_changes": []
+          },
+          "exit_code": 0,
+          "attempt_id": "fix-ed2248"
+        }
+      },
+      "fix_ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m474 passed\u001b[39m\u001b[22m\u001b[90m (474)\u001b[39m"
+      },
+      "fix_src_only": {
+        "changed": [
+          "src/parse.ts"
+        ],
+        "ordinary_tests": {
+          "ran": true,
+          "passed": true,
+          "runner": "npm-test",
+          "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m473 passed\u001b[39m\u001b[22m\u001b[90m (473)\u001b[39m"
+        }
+      },
+      "valid": true
+    },
+    {
+      "task": "entities-legacy-attribute-interrupted",
+      "baseline": {
+        "verdict": "CONTRADICTED",
+        "ok": false,
+        "receipt": "92e63e51ff8a187d1601a400a1f5c23685b430da23d512e9af706547cfa7826d",
+        "requirements": {
+          "interrupted-legacy-match-not-committed": "CONTRADICTED",
+          "preserve-attribute-decoding": "VERIFIED"
+        },
+        "reasons": [
+          "requirement 'interrupted-legacy-match-not-committed' is CONTRADICTED"
+        ],
+        "counterexample": {
+          "requirement_id": "interrupted-legacy-match-not-committed",
+          "invariant": "A legacy entity match interrupted by descending into a longer entity is not decoded in attribute mode",
+          "input": [
+            "&notin\u0000;"
+          ],
+          "expected": "&notin\u0000;",
+          "observed": "¬in\u0000;",
+          "detail": "Approved must-change requirement conflicts with the observed result.",
+          "shrunk": false
+        },
+        "integrity": {
+          "pointer_before": null,
+          "pointer_after": "92e63e51ff8a187d1601a400a1f5c23685b430da23d512e9af706547cfa7826d",
+          "fresh_receipt": true,
+          "receipt_content_address_ok": true,
+          "referenced_objects_ok": true,
+          "candidate_identity": {
+            "files_checked": 44,
+            "files_hash_matched": [
+              ".github/dependabot.yml",
+              ".github/FUNDING.yml",
+              ".github/workflows/codeql-analysis.yml",
+              ".github/workflows/dependabot-automerge.yml",
+              ".github/workflows/gh-pages.yml",
+              ".github/workflows/nodejs-test.yml",
+              ".github/workflows/publish.yml",
+              ".gitignore",
+              "biome.json",
+              "eslint.config.mjs",
+              "LICENSE",
+              "maps/entities.json",
+              "maps/legacy.json",
+              "maps/xml.json",
+              "package-lock.json",
+              "package.json",
+              "readme.md",
+              "scripts/benchmark.ts",
+              "scripts/trie/compact-run.spec.ts",
+              "scripts/trie/decode-trie.spec.ts",
+              "scripts/trie/decode-trie.ts",
+              "scripts/trie/encode-trie.spec.ts",
+              "scripts/trie/encode-trie.ts",
+              "scripts/trie/README.md",
+              "scripts/trie/trie.ts",
+              "scripts/write-decode-map.ts",
+              "scripts/write-encode-map.ts",
+              "src/decode-codepoint.ts",
+              "src/decode-stream.spec.ts",
+              "src/decode.spec.ts",
+              "src/decode.ts",
+              "src/encode.spec.ts",
+              "src/encode.ts",
+              "src/escape.spec.ts",
+              "src/escape.ts",
+              "src/generated/decode-data-html.ts",
+              "src/generated/decode-data-xml.ts",
+              "src/generated/encode-html.ts",
+              "src/index.spec.ts",
+              "src/index.ts",
+              "src/internal/bin-trie-flags.ts",
+              "src/internal/decode-shared.ts",
+              "tsconfig.eslint.json",
+              "tsconfig.json"
+            ],
+            "files_mismatched": [],
+            "files_missing": []
+          },
+          "snapshot_git_head_matches_receipt": true,
+          "change_scope": {
+            "allowed_paths": [
+              "src/decode.ts"
+            ],
+            "changes": [],
+            "out_of_scope": [],
+            "unauthorised_classification": [],
+            "test_changes": [],
+            "dependency_changes": []
+          },
+          "exit_code": 1,
+          "attempt_id": "baseline-ec5207"
+        }
+      },
+      "baseline_ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m124 passed\u001b[39m\u001b[22m\u001b[90m (124)\u001b[39m"
+      },
+      "fix": {
+        "verdict": "VERIFIED",
+        "ok": true,
+        "receipt": "7e08c90bec20dfc262bd5c4ccd519bd7d5200cd2018e2f5a8d58809014d1b30f",
+        "requirements": {
+          "interrupted-legacy-match-not-committed": "VERIFIED",
+          "preserve-attribute-decoding": "VERIFIED"
+        },
+        "reasons": [],
+        "counterexample": null,
+        "integrity": {
+          "pointer_before": null,
+          "pointer_after": "7e08c90bec20dfc262bd5c4ccd519bd7d5200cd2018e2f5a8d58809014d1b30f",
+          "fresh_receipt": true,
+          "receipt_content_address_ok": true,
+          "referenced_objects_ok": true,
+          "candidate_identity": {
+            "files_checked": 44,
+            "files_hash_matched": [
+              ".github/dependabot.yml",
+              ".github/FUNDING.yml",
+              ".github/workflows/codeql-analysis.yml",
+              ".github/workflows/dependabot-automerge.yml",
+              ".github/workflows/gh-pages.yml",
+              ".github/workflows/nodejs-test.yml",
+              ".github/workflows/publish.yml",
+              ".gitignore",
+              "biome.json",
+              "eslint.config.mjs",
+              "LICENSE",
+              "maps/entities.json",
+              "maps/legacy.json",
+              "maps/xml.json",
+              "package-lock.json",
+              "package.json",
+              "readme.md",
+              "scripts/benchmark.ts",
+              "scripts/trie/compact-run.spec.ts",
+              "scripts/trie/decode-trie.spec.ts",
+              "scripts/trie/decode-trie.ts",
+              "scripts/trie/encode-trie.spec.ts",
+              "scripts/trie/encode-trie.ts",
+              "scripts/trie/README.md",
+              "scripts/trie/trie.ts",
+              "scripts/write-decode-map.ts",
+              "scripts/write-encode-map.ts",
+              "src/decode-codepoint.ts",
+              "src/decode-stream.spec.ts",
+              "src/decode.spec.ts",
+              "src/decode.ts",
+              "src/encode.spec.ts",
+              "src/encode.ts",
+              "src/escape.spec.ts",
+              "src/escape.ts",
+              "src/generated/decode-data-html.ts",
+              "src/generated/decode-data-xml.ts",
+              "src/generated/encode-html.ts",
+              "src/index.spec.ts",
+              "src/index.ts",
+              "src/internal/bin-trie-flags.ts",
+              "src/internal/decode-shared.ts",
+              "tsconfig.eslint.json",
+              "tsconfig.json"
+            ],
+            "files_mismatched": [],
+            "files_missing": []
+          },
+          "snapshot_git_head_matches_receipt": true,
+          "change_scope": {
+            "allowed_paths": [
+              "src/decode.ts"
+            ],
+            "changes": [],
+            "out_of_scope": [],
+            "unauthorised_classification": [],
+            "test_changes": [],
+            "dependency_changes": []
+          },
+          "exit_code": 0,
+          "attempt_id": "fix-a1e720"
+        }
+      },
+      "fix_ordinary_tests": {
+        "ran": true,
+        "passed": true,
+        "runner": "npm-test",
+        "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m127 passed\u001b[39m\u001b[22m\u001b[90m (127)\u001b[39m"
+      },
+      "fix_src_only": {
+        "changed": [
+          "src/decode.ts"
+        ],
+        "ordinary_tests": {
+          "ran": true,
+          "passed": true,
+          "runner": "npm-test",
+          "summary": "\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m124 passed\u001b[39m\u001b[22m\u001b[90m (124)\u001b[39m"
+        }
+      },
+      "valid": true
+    }
+  ],
+  "manifest_sha256": "a380a1b7f30756d5af3026a94ec3f33f996d888f6819e048341ab0465c36d6cc"
+}

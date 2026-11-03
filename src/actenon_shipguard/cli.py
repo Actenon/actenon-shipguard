@@ -6,6 +6,11 @@
   actenon-shipguard report --out DIR     render the self-contained HTML evidence report
   actenon-shipguard doctor               environment diagnostics
   actenon-shipguard run "task" --agent   real coding-agent repair loop (see status)
+  actenon-shipguard discover [--module]  BDE: discover behavioural laws + falsify (read-only)
+  actenon-shipguard check --base REV     BDE: laws for the diff vs base + preservation
+  actenon-shipguard explain ID           BDE: full provenance of a finding
+  actenon-shipguard reproduce ID         BDE: independently re-execute a witness
+  actenon-shipguard repair ID --agent    BDE: agent repair of a finding, re-verified independently
 
 Exit codes: 0 success/verified, 1 refused/contradiction/failed, 2 usage/environment error.
 """
@@ -20,9 +25,11 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .pipeline import FIXTURES, run_demo
-from .report import write_demo_report
-from .trust import ROLE_CORRECTNESS, TrustRoots, generate_trust_roots
+from .orchestrator import run_task
+from .pipeline import run_demo
+from .report import write_demo_report, write_run_report
+from .sentinel import find_sentinel
+from .trust import TrustRoots, generate_trust_roots
 
 
 def _find_tsx(explicit: str | None) -> Path | None:
@@ -158,22 +165,133 @@ def cmd_doctor(args) -> int:
     claude = shutil.which("claude"); codex = shutil.which("codex")
     print(f"  [{'ok' if claude else 'absent'}] claude CLI (real-agent mode){'' if claude else ' — offline demo still works'}")
     print(f"  [{'ok' if codex else 'absent'}] codex CLI (real-agent mode)")
+    from .bde import laws as _bde_laws
+    try:
+        schema_file = Path(__file__).resolve().parent / "bde" / "laws-schema.json"
+        have_schema = schema_file.exists()
+        probes = _bde_laws.validate_lawpack({"schema_version": _bde_laws.SCHEMA_VERSION, "module": "x", "laws": []})
+        print(f"  [{'ok' if have_schema and not probes else 'MISSING'}] BDE law schema v{_bde_laws.SCHEMA_VERSION}")
+        checks.append(have_schema and not probes)
+    except Exception:  # noqa: BLE001
+        print("  [MISSING] BDE law schema"); checks.append(False)
     return 0 if all(checks) else 2
 
 
+def _find_node_modules(explicit: str | None) -> Path | None:
+    """Locate a node_modules providing vitest for the candidate repo's ordinary tests."""
+    if explicit:
+        p = Path(explicit).expanduser()
+        return p if p.exists() else None
+    env = os.environ.get("SHIPGUARD_NODE_MODULES")
+    if env and Path(env).exists():
+        return Path(env)
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        for cand in (parent / "sentinel-verified" / "node_modules", parent / "node_modules"):
+            if (cand / ".bin" / "vitest").exists():
+                return cand
+    return None
+
+
+def _select_adapter(name: str):
+    if name == "codex":
+        from .adapters.codex import CodexAdapter
+        return CodexAdapter()
+    if name == "claude":
+        from .adapters.claude import ClaudeAdapter
+        return ClaudeAdapter()
+    from .adapters.offline import OfflineAdapter
+    return OfflineAdapter()
+
+
+_EXIT_BY_STATUS = {"verified": 0, "contradicted": 1, "no_change": 1, "review_required": 1,
+                   "environment_failure": 2, "interrupted": 2, "unverified": 1}
+
+
 def cmd_run(args) -> int:
-    if args.agent in ("claude", "codex"):
-        print(
-            f"actenon-shipguard run --agent {args.agent}: the real coding-agent repair loop "
-            "(edit -> ordinary tests -> independent challenge -> counterexample -> repair -> reverify)\n"
-            "is NOT wired in this v0.1.0 pre-release. The trust boundary, offline demo and adversarial\n"
-            "suite are complete and tested; the live Claude/Codex adapter is an explicit release blocker.\n"
-            "Run `actenon-shipguard demo` for the deterministic protected-execution demonstration.",
-            file=sys.stderr,
-        )
+    task = (args.task or "").strip()
+    if not task:
+        print('ERROR: a task is required, e.g. actenon-shipguard run "Fix the payment allocation bug" --agent codex',
+              file=sys.stderr)
         return 2
-    # offline agent == the deterministic demo
-    return cmd_demo(args)
+
+    adapter = _select_adapter(args.agent)
+    sentinel_cli = find_sentinel(args.sentinel)
+    node_modules = _find_node_modules(args.node_modules)
+    live = adapter.mode == "live"
+    banner = f"[LIVE agent: {adapter.name}]" if live else "[OFFLINE deterministic — NOT a live model repair]"
+
+    print(f"actenon-shipguard run {banner}")
+    print(f"  task        : {task}")
+    print(f"  verifier    : sentinel={'ok' if sentinel_cli else 'MISSING'}  "
+          f"node_modules={'ok' if node_modules else 'MISSING (ordinary tests skipped)'}  runner={args.runner}")
+
+    # The real Sentinel verifier is mandatory for independent acceptance — never fall back to a
+    # synthetic receipt for a live/production run, and never fabricate verification.
+    if sentinel_cli is None:
+        print("ERROR: the real Sentinel verifier is required for independent acceptance and was not found.\n"
+              "       Set SHIPGUARD_SENTINEL=/path/to/sentinel/dist/cli.js (or put `sentinel` on PATH).",
+              file=sys.stderr)
+        return 2
+    if live:
+        ok, reason = adapter.available()
+        if not ok:
+            print(f"ERROR: agent '{args.agent}' is unavailable: {reason}", file=sys.stderr)
+            print("       ShipGuard never fabricates model activity. Authenticate the agent (e.g. `codex login`),\n"
+                  "       or use `--agent offline` for the labelled deterministic regression run.", file=sys.stderr)
+            return 2
+
+    out = Path(args.out)
+    work = out / "tmp"                      # disposable (gitignored): candidate repo + verifier store
+    approved = Path(args.contract).expanduser() if args.contract else None
+    source_repo = Path(args.repo).expanduser() if args.repo else None
+    if source_repo is not None and approved is None:
+        print("ERROR: --repo (a real developer repository) requires an explicit --contract with the\n"
+              "       developer-approved acceptance requirements. ShipGuard never invents acceptance\n"
+              "       criteria from the agent's own output.", file=sys.stderr)
+        return 2
+    if source_repo is not None and not source_repo.exists():
+        print(f"ERROR: --repo path does not exist: {source_repo}", file=sys.stderr)
+        return 2
+    mode_label = "real-repository (isolated clone)" if source_repo else "synthetic settlement fixture"
+    print(f"  target      : {mode_label} · module={args.module} export={args.export}")
+
+    rec = run_task(task=task, adapter=adapter, work=work, sentinel_cli=sentinel_cli,
+                   approved_contract=approved, node_modules=node_modules,
+                   max_attempts=args.max_attempts, agent_timeout=args.agent_timeout,
+                   runner=args.runner, evidence_dir=out, source_repo=source_repo,
+                   target_file=args.module, export=args.export)
+
+    # Durable evidence: the run-record embeds the Sentinel receipt hash, bindings, verdicts and
+    # counterexamples. The raw content-addressed receipt stays in the gitignored tmp store (it binds
+    # absolute paths and is reproducible by re-running); we do not copy it into public evidence.
+    report = write_run_report(rec.to_dict(), out / "shipguard-run-report.html")
+
+    # Actionable terminal summary.
+    print(f"\n  result      : {rec.final_status.upper()}  (agent={rec.agent}, mode={rec.mode})")
+    print(f"  lifecycle   : {' -> '.join(rec.states)}")
+    if rec.ordinary_tests_green_on_defect:
+        print("  ASPIRIN     : ordinary tests were GREEN while independent Sentinel CONTRADICTED an approved requirement")
+    if rec.final_counterexample:
+        c = rec.final_counterexample
+        print(f"  counterex.  : {c.get('requirement_id')} allocate({c.get('input')}) "
+              f"expected {c.get('expected')} observed {c.get('observed')}")
+    last = (rec.attempts[-1].get("challenge") if rec.attempts else {}) or {}
+    if last.get("receipt_hash"):
+        print(f"  receipt     : {last.get('receipt_hash')}")
+    if rec.tree_binding:
+        tb = rec.tree_binding
+        print(f"  tree binding: commit {str(tb.get('commit'))[:12]} byte-identical to the verified "
+              f"candidate: {tb.get('equivalent')} ({tb.get('files_checked')} files hash-matched)")
+    if rec.original_untouched is not None:
+        print(f"  source repo : original working tree untouched: {rec.original_untouched}")
+    print(f"  evidence    : {out / 'run-record.json'}")
+    print(f"  report      : {report}")
+    if args.open:
+        _open(report)
+    code = _EXIT_BY_STATUS.get(rec.final_status, 1)
+    print(f"RUN RESULT: {rec.final_status.upper()} (exit {code})")
+    return code
 
 
 def _open(path: Path) -> None:
@@ -184,6 +302,235 @@ def _open(path: Path) -> None:
             subprocess.run(["xdg-open", str(path)], check=False)
     except Exception:
         pass
+
+
+# --------------------------------------------------------------------------- #
+# BDE — behavioural discovery commands
+# --------------------------------------------------------------------------- #
+def _load_evidence(evidence_dir: str) -> dict:
+    p = Path(evidence_dir) / "bde-evidence.json"
+    if not p.exists():
+        # fall back to the default location used by discover/check
+        p = Path(".shipguard-bde") / "bde-evidence.json"
+    if not p.exists():
+        print(f"ERROR: no BDE evidence found at {p} — run `shipguard discover` or `shipguard check` first, "
+              f"or pass --evidence <dir>.", file=sys.stderr)
+        raise SystemExit(2)
+    import hashlib
+    digest_file = p.with_suffix(".sha256")
+    if not digest_file.exists() or hashlib.sha256(p.read_bytes()).hexdigest() != digest_file.read_text().strip():
+        raise SystemExit("BDE evidence checksum mismatch or missing; rediscover before reproduction")
+    evidence = json.loads(p.read_text())
+    lawpack = p.parent / "bde-laws.json"
+    if not lawpack.exists() or hashlib.sha256(lawpack.read_bytes()).hexdigest() != evidence.get("lawpack_sha256"):
+        raise SystemExit("BDE lawpack identity mismatch; rediscover before reproduction")
+    return evidence
+
+
+def cmd_discover(args) -> int:
+    from .bde.check import run_bde
+    from .bde.report import terminal_summary, write_reports
+    repo = Path(args.repo).resolve() if args.repo else Path.cwd()
+    out = Path(args.out)
+    result = run_bde(repo, module=args.module, export=args.export, base=None, out_dir=out,
+                     tsx_path=args.tsx, allow_local=args.allow_local, runner=args.runner, image=args.image,
+                     allow_host_intake=args.allow_host_intake)
+    print(terminal_summary(result))
+    paths = write_reports(result, out)
+    print(f"\n  reports    : {paths['html']}  (+ {paths['json'].name}, {paths['summary'].name})")
+    if args.open:
+        _open(paths["html"])
+    return result.exit_code
+
+
+def cmd_check(args) -> int:
+    from .bde.check import run_bde
+    from .bde.report import terminal_summary, write_reports
+    repo = Path(args.repo).resolve() if args.repo else Path.cwd()
+    out = Path(args.out)
+    result = run_bde(repo, module=args.module, export=args.export, base=args.base, out_dir=out,
+                     tsx_path=args.tsx, allow_local=args.allow_local, runner=args.runner, image=args.image,
+                     allow_host_intake=args.allow_host_intake)
+    print(terminal_summary(result))
+    paths = write_reports(result, out)
+    print(f"\n  reports    : {paths['html']}  (+ {paths['json'].name}, {paths['summary'].name})")
+    if args.open:
+        _open(paths["html"])
+    return result.exit_code
+
+
+def cmd_explain(args) -> int:
+    ev = _load_evidence(args.evidence)
+    f = next((x for x in ev.get("findings", []) if x.get("finding_id") == args.finding_id), None)
+    if f is None:
+        print(f"ERROR: finding {args.finding_id!r} not found in the evidence record.", file=sys.stderr)
+        return 2
+    law = f.get("law") or {}
+    g = law.get("grounding") or {}
+    print(f"FINDING {f['finding_id']} — {f['bde_status']}")
+    print(f"  law        : {law.get('statement')}")
+    print(f"  predicate  : {law.get('predicate')}  (family {law.get('kind')})")
+    print(f"  class      : {law.get('evidence_class')} / approval {law.get('approval')}"
+          f"  confidence {law.get('confidence')}")
+    if law.get("qualification"):
+        q = law["qualification"]
+        print(f"  qualified  : rule {q.get('rule')} — {'; '.join(q.get('reasons') or [])}")
+    print(f"  grounding  : {g.get('source_type')} — {g.get('file')}:{g.get('line_start')}-{g.get('line_end')}")
+    print(f"                file sha256 {str(g.get('sha256'))[:16]}… at revision {g.get('revision')}")
+    print(f"                excerpt: {g.get('excerpt')}")
+    print(f"  witness    : {f.get('export')}({json.dumps(f.get('minimal_args'), ensure_ascii=False)})")
+    print(f"  expected   : {json.dumps(f.get('expected'), ensure_ascii=False, default=str)}")
+    print(f"  observed   : {json.dumps(f.get('observed'), ensure_ascii=False, default=str)}")
+    print(f"  detail     : {f.get('detail')}")
+    dep = f.get("dependency_identity") or {}
+    print(f"  identity   : {dep.get('package')}@{dep.get('package_version')} module {dep.get('module')}")
+    print(f"               module sha256 {str(dep.get('module_sha256'))[:16]}… revision {dep.get('git_revision')}")
+    print(f"  limitations: {'; '.join(law.get('limitations') or [])}")
+    print(f"  reproduce  : shipguard reproduce {f['finding_id']} --evidence {args.evidence}")
+    print(f"               standalone: tsx bde-repro-{f['finding_id']}.mjs (in the evidence dir)")
+    return 0
+
+
+def cmd_reproduce(args) -> int:
+    """Independently re-execute a finding's witness in a FRESH disposable clone.
+
+    The re-execution runs the SAME reviewed predicate against the SAME module in a NEW clone
+    of the developer's repository — not a replay of the recorded output.
+    """
+    from .bde.check import _consented
+    if getattr(args, "runner", "local") == "local" and not _consented(getattr(args, "allow_local", False)):
+        print("ERROR: reproduction executes repository code; explicitly use --allow-local "
+              "for trusted code only (advisory isolation).", file=sys.stderr)
+        return 2
+    if getattr(args, "runner", "local") == "docker" and not getattr(args, "allow_host_intake", False):
+        print("ERROR: Docker contains target execution, not host repository intake. "
+              "Use --allow-host-intake only for a reviewed tree and trusted Git configuration; "
+              "arbitrary hostile repository intake is unsupported.", file=sys.stderr)
+        return 2
+    ev = _load_evidence(args.evidence)
+    f = next((x for x in ev.get("findings", []) if x.get("finding_id") == args.finding_id), None)
+    if f is None:
+        print(f"ERROR: finding {args.finding_id!r} not found.", file=sys.stderr)
+        return 2
+    tsx = _find_tsx(args.tsx)
+    if tsx is None and args.runner == "local":
+        print("ERROR: tsx not found (SHIPGUARD_TSX / --tsx).", file=sys.stderr)
+        return 2
+    repo = Path(args.repo).resolve() if args.repo else Path.cwd()
+    ev_dir = Path(args.evidence) if (Path(args.evidence) / "bde-laws.json").exists() else Path(".shipguard-bde")
+    laws_doc = json.loads((ev_dir / "bde-laws.json").read_text())
+    law = next((candidate_law for candidate_law in laws_doc.get("laws", [])
+                if candidate_law.get("law_id") == (f.get("law") or {}).get("law_id")), None)
+    if law is None:
+        print("ERROR: the violated law record is missing from the evidence (bde-laws.json).", file=sys.stderr)
+        return 2
+    from .bde.laws import BehaviouralLaw
+    from .bde.scheduler import run_lawpack
+    from .bde.strategies import execution_for
+    from .orchestrator import clone_isolated
+    law_obj = BehaviouralLaw.from_dict(dict(law))
+    entry = execution_for(law_obj)
+    if entry is None:
+        print("ERROR: law is not executable as recorded.", file=sys.stderr)
+        return 2
+    # Bind reproduction to the exact recorded witness, not a regenerated domain.
+    entry["gen"] = {"mode": "literal", "args": f["minimal_args"], "shrink": False}
+    import hashlib
+    target = repo / f["module"]
+    from .orchestrator import repo_fingerprint
+    if repo_fingerprint(repo)["tracked_content_sha256"] != (ev.get("repo") or {}).get("tracked_content_sha256"):
+        print("ERROR: tracked source identity differs from the recorded witness.", file=sys.stderr)
+        return 2
+    expected_hash = (f.get("dependency_identity") or {}).get("module_sha256")
+    if not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != expected_hash:
+        print("ERROR: source identity differs from the recorded witness; rediscover the current revision.", file=sys.stderr)
+        return 2
+    pack = {"schema_version": 1, "module": laws_doc.get("module") or f.get("module"),
+            "git_revision": laws_doc.get("git_revision", ""), "laws": [entry]}
+    work = ev_dir / "repro-tmp"
+    clone = clone_isolated(repo, work)
+    rep = run_lawpack(pack, clone, Path(tsx) if tsx else None, laws_meta={law_obj.law_id: law_obj},
+                       mode="discover", runner=args.runner, image=args.image)
+    outcome = rep.outcomes_for(law_obj.law_id)
+    print(f"re-producing finding {args.finding_id} in a fresh clone ({clone.name})")
+    print(f"  law      : {(f.get('law') or {}).get('statement')}")
+    print(f"  recorded : {f.get('detail')}")
+    if outcome is None:
+        print(f"  re-run   : {rep.runner_error or 'no outcome'}")
+        return 2
+    print(f"  re-run   : {outcome.status} (trials={outcome.trials})")
+    if outcome.status == "FAIL" and outcome.finding:
+        fl = outcome.finding
+        print(f"  witness  : {fl.get('args')}")
+        print(f"  detail   : {fl.get('detail')}")
+        print("REPRODUCED: the violation occurs again under independent re-execution.")
+        return 0
+    if outcome.status == "PASS":
+        print("NOT REPRODUCED: the law holds in the current repository state (was it fixed since "
+              "the finding was recorded?).")
+        return 1
+    print(f"NOT REPRODUCED: environment outcome {outcome.status} — {outcome.detail}")
+    return 2
+
+
+def cmd_repair(args) -> int:
+    """Repair a BDE finding with a real agent; the repaired candidate is re-verified
+    independently (the agent never grades itself and never edits its acceptance)."""
+    if not getattr(args, "contract", None):
+        print("ERROR: repair requires --contract with independently approved acceptance criteria; "
+              "a discovered law does not approve itself.", file=sys.stderr)
+        return 2
+    ev = _load_evidence(args.evidence)
+    f = next((x for x in ev.get("findings", []) if x.get("finding_id") == args.finding), None)
+    if f is None:
+        print(f"ERROR: finding {args.finding!r} not found in the evidence record.", file=sys.stderr)
+        return 2
+    law = f.get("law") or {}
+    g = law.get("grounding") or {}
+    task = (f"Fix this behavioural defect.\n\nViolated requirement (grounded in {g.get('file')}:{g.get('line_start')}):\n"
+            f"  {law.get('statement')}\n\nMinimal failing witness:\n"
+            f"  {f.get('export')}({json.dumps(f.get('minimal_args'), ensure_ascii=False)})\n"
+            f"  observed: {f.get('detail')}\n\n"
+            f"Fix the underlying cause for the whole requirement class; do not special-case the witness input.\n"
+            f"Edit only the module {f.get('module')}.")
+    adapter = _select_adapter(args.agent)
+    sentinel_cli = find_sentinel(args.sentinel)
+    if sentinel_cli is None:
+        print("ERROR: the real Sentinel verifier is required for independent re-verification.\n"
+              "       Set SHIPGUARD_SENTINEL (see shipguard doctor).", file=sys.stderr)
+        return 2
+    live = adapter.mode == "live"
+    if live:
+        ok, reason = adapter.available()
+        if not ok:
+            print(f"ERROR: agent '{args.agent}' is unavailable: {reason}", file=sys.stderr)
+            return 2
+    from .orchestrator import run_task
+    repo = Path(args.repo).resolve() if args.repo else Path.cwd()
+    out = Path(args.out)
+    # The discovery engine cannot approve the requirement it inferred. An external
+    # contract supplied by the developer/evaluator is mandatory; never manufacture
+    # acceptance from an error-description string or the agent's output.
+    contract_file = Path(args.contract).resolve()
+    if not contract_file.is_file():
+        print("ERROR: independently approved contract file not found.", file=sys.stderr)
+        return 2
+    if contract_file.is_relative_to(repo):
+        print("ERROR: approval contract must be outside the candidate repository.", file=sys.stderr)
+        return 2
+    out.mkdir(parents=True, exist_ok=True)
+    rec = run_task(task=task, adapter=adapter, work=out / "tmp", sentinel_cli=sentinel_cli,
+                   approved_contract=contract_file, node_modules=_find_node_modules(args.node_modules),
+                   max_attempts=args.max_attempts, agent_timeout=args.agent_timeout,
+                   runner=args.runner, evidence_dir=out, source_repo=repo,
+                   target_file=f.get("module"), export=f.get("export"))
+    from .report import write_run_report
+    report = write_run_report(rec.to_dict(), out / "shipguard-run-report.html")
+    print(f"\n  repair result: {rec.final_status.upper()}  (agent={rec.agent}, mode={rec.mode})")
+    print(f"  evidence     : {out / 'run-record.json'}")
+    print(f"  report       : {report}")
+    print("  NOTE: the repaired tree is re-verified by Sentinel, not by the agent's own statement.")
+    return _EXIT_BY_STATUS.get(rec.final_status, 1)
 
 
 def main(argv=None) -> int:
@@ -204,10 +551,90 @@ def main(argv=None) -> int:
     p.add_argument("--cert", required=True); p.add_argument("--trust-roots", required=True); p.set_defaults(fn=cmd_verify)
     p = sub.add_parser("report", help="render the HTML evidence report"); p.add_argument("--out", required=True); p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_report)
     p = sub.add_parser("doctor", help="environment diagnostics"); p.set_defaults(fn=cmd_doctor)
-    p = sub.add_parser("run", help="real coding-agent repair loop"); p.add_argument("task", nargs="?", default="")
+    p = sub.add_parser("run", help="real coding-agent repair loop (independent Sentinel acceptance)")
+    p.add_argument("task", nargs="?", default="")
     p.add_argument("--agent", default="offline", choices=["claude", "codex", "offline"])
-    p.add_argument("--out", default=str(Path("evidence") / "shipguard-demo")); p.add_argument("--trials", type=int, default=200000)
-    p.add_argument("--tsx", default=None); p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_run)
+    p.add_argument("--out", default=str(Path("evidence") / "shipguard-run"))
+    p.add_argument("--max-attempts", type=int, default=2, help="bounded repair attempts (0 = no repair)")
+    p.add_argument("--agent-timeout", type=int, default=600, help="per-attempt agent timeout (seconds)")
+    p.add_argument("--runner", default="local", choices=["local", "docker"],
+                   help="Sentinel verification runner (local is advisory; docker isolates)")
+    p.add_argument("--sentinel", default=None, help="path to sentinel CLI (or set SHIPGUARD_SENTINEL)")
+    p.add_argument("--node-modules", default=None, help="node_modules providing vitest (or set SHIPGUARD_NODE_MODULES)")
+    p.add_argument("--contract", default=None,
+                   help="path to the developer-approved Sentinel acceptance contract (held out from the agent)")
+    p.add_argument("--repo", default=None,
+                   help="run against a REAL JS/TS repository (cloned into a disposable isolated copy; "
+                        "the original tree is never modified). Requires --contract.")
+    p.add_argument("--module", default="src/settle.ts", help="target module path within the repository")
+    p.add_argument("--export", default="allocate", help="exported function under verification")
+    p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_run)
+
+    # ---- BDE: behavioural discovery -------------------------------------------------- #
+    p = sub.add_parser("discover", help="BDE: discover behavioural laws from repo evidence and try to falsify them")
+    p.add_argument("--module", default=None, help="target module (default: auto-detect src/index.ts)")
+    p.add_argument("--export", default=None, help="restrict to one exported function")
+    p.add_argument("--repo", default=None, help="repository to inspect (default: current directory; read-only)")
+    p.add_argument("--out", default=str(Path(".shipguard-bde")))
+    p.add_argument("--tsx", default=None, help="path to tsx (or set SHIPGUARD_TSX)")
+    p.add_argument("--allow-local", action="store_true",
+                   help="CONSENT: execute the repo's own module code locally (advisory isolation) to "
+                        "falsify laws, including trusted host repository intake.")
+    p.add_argument("--allow-host-intake", action="store_true",
+                   help="CONSENT: read a reviewed repository with trusted Git configuration on the host; "
+                        "required with Docker. Arbitrary hostile repository intake is unsupported.")
+    p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_discover)
+
+    p.add_argument("--runner", choices=["local", "docker"], default="local", help="local requires consent; docker requires a pinned image")
+    p.add_argument("--image", default=None, help="BDE image digest (or SHIPGUARD_BDE_IMAGE)")
+
+    p = sub.add_parser("check", help="BDE: behavioural laws for the diff vs --base, plus preservation regressions")
+    p.add_argument("--base", default="origin/main", help="base revision for the diff (default origin/main)")
+    p.add_argument("--module", default=None, help="target module (default: auto-detect)")
+    p.add_argument("--export", default=None, help="restrict to one exported function")
+    p.add_argument("--repo", default=None, help="repository to inspect (default: current directory; read-only)")
+    p.add_argument("--out", default=str(Path(".shipguard-bde")))
+    p.add_argument("--tsx", default=None, help="path to tsx (or set SHIPGUARD_TSX)")
+    p.add_argument("--allow-local", action="store_true",
+                   help="CONSENT: execute the repo's own module code locally (advisory isolation)")
+    p.add_argument("--allow-host-intake", action="store_true",
+                   help="CONSENT: host intake of a reviewed tree and trusted Git configuration; required with Docker")
+    p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_check)
+
+    p.add_argument("--runner", choices=["local", "docker"], default="local", help="local requires consent; docker requires a pinned image")
+    p.add_argument("--image", default=None, help="BDE image digest (or SHIPGUARD_BDE_IMAGE)")
+
+    p = sub.add_parser("explain", help="BDE: full provenance and witness of a finding")
+    p.add_argument("finding_id")
+    p.add_argument("--evidence", default=str(Path(".shipguard-bde")), help="BDE evidence directory")
+    p.set_defaults(fn=cmd_explain)
+
+    p = sub.add_parser("reproduce", help="BDE: independently re-execute a finding's witness in a fresh clone")
+    p.add_argument("finding_id")
+    p.add_argument("--evidence", default=str(Path(".shipguard-bde")), help="BDE evidence directory")
+    p.add_argument("--repo", default=None, help="repository (default: current directory; read-only)")
+    p.add_argument("--tsx", default=None, help="path to tsx (or set SHIPGUARD_TSX)")
+    p.add_argument("--allow-local", action="store_true", help="explicit consent for trusted local repository execution")
+    p.add_argument("--allow-host-intake", action="store_true",
+                   help="CONSENT: host intake of a reviewed tree and trusted Git configuration; required with Docker")
+    p.set_defaults(fn=cmd_reproduce)
+
+    p.add_argument("--runner", choices=["local", "docker"], default="local", help="local requires consent; docker requires a pinned image")
+    p.add_argument("--image", default=None, help="BDE image digest (or SHIPGUARD_BDE_IMAGE)")
+
+    p = sub.add_parser("repair", help="BDE: agent repair of a finding, re-verified independently by Sentinel")
+    p.add_argument("finding")
+    p.add_argument("--agent", default="codex", choices=["claude", "codex", "offline"])
+    p.add_argument("--evidence", default=str(Path(".shipguard-bde")), help="BDE evidence directory")
+    p.add_argument("--repo", default=None, help="repository (default: current directory; read-only)")
+    p.add_argument("--out", default=str(Path("evidence") / "shipguard-bde-repair"))
+    p.add_argument("--max-attempts", type=int, default=2)
+    p.add_argument("--agent-timeout", type=int, default=600)
+    p.add_argument("--runner", default="local", choices=["local", "docker"])
+    p.add_argument("--sentinel", default=None, help="path to sentinel CLI (or set SHIPGUARD_SENTINEL)")
+    p.add_argument("--node-modules", default=None, help="node_modules providing vitest")
+    p.add_argument("--contract", required=True, help="independently approved acceptance contract outside the candidate repository")
+    p.set_defaults(fn=cmd_repair)
 
     args = ap.parse_args(argv)
     return args.fn(args)

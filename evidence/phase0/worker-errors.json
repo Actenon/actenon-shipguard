@@ -1,0 +1,723 @@
+{
+  "node20-native-strip-True": {
+    "module": "src/index.ts",
+    "revision": "HEAD",
+    "executed": 0,
+    "passed": 0,
+    "failed": 0,
+    "errors": 6,
+    "skipped": 0,
+    "not_run": 0,
+    "outcomes": [
+      {
+        "law_id": "bde-law-6524cfa5f3",
+        "predicate": "example_executable",
+        "status": "ERROR",
+        "trials": 0,
+        "detail": "TypeError: Unknown file extension \".ts\" for $WORK/baseline/py312-node20/test_discover_finds_the_defect0/repo/src/index.ts",
+        "shrunk": null,
+        "duration_ms": 48,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-95bbf07fe4",
+        "predicate": "example_executable",
+        "status": "ERROR",
+        "trials": 0,
+        "detail": "TypeError: Unknown file extension \".ts\" for $WORK/baseline/py312-node20/test_discover_finds_the_defect0/repo/src/index.ts",
+        "shrunk": null,
+        "duration_ms": 35,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-691e311dfb",
+        "predicate": "example_executable",
+        "status": "ERROR",
+        "trials": 0,
+        "detail": "TypeError: Unknown file extension \".ts\" for $WORK/baseline/py312-node20/test_discover_finds_the_defect0/repo/src/index.ts",
+        "shrunk": null,
+        "duration_ms": 33,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-c1faf93843",
+        "predicate": "split_boundary_justified",
+        "status": "ERROR",
+        "trials": 0,
+        "detail": "TypeError: Unknown file extension \".ts\" for $WORK/baseline/py312-node20/test_discover_finds_the_defect0/repo/src/index.ts",
+        "shrunk": null,
+        "duration_ms": 33,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-6f68220dbe",
+        "predicate": "optional_args_equivalent",
+        "status": "ERROR",
+        "trials": 0,
+        "detail": "TypeError: Unknown file extension \".ts\" for $WORK/baseline/py312-node20/test_discover_finds_the_defect0/repo/src/index.ts",
+        "shrunk": null,
+        "duration_ms": 32,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-26e38ab9dd",
+        "predicate": "determinism",
+        "status": "ERROR",
+        "trials": 0,
+        "detail": "TypeError: Unknown file extension \".ts\" for $WORK/baseline/py312-node20/test_discover_finds_the_defect0/repo/src/index.ts",
+        "shrunk": null,
+        "duration_ms": 33,
+        "finding": null
+      }
+    ],
+    "findings": [],
+    "runner_error": null,
+    "duration_ms": 337
+  },
+  "node22-native-strip-True": {
+    "module": "src/index.ts",
+    "revision": "HEAD",
+    "executed": 6,
+    "passed": 4,
+    "failed": 2,
+    "errors": 0,
+    "skipped": 0,
+    "not_run": 0,
+    "outcomes": [
+      {
+        "law_id": "bde-law-6524cfa5f3",
+        "predicate": "example_executable",
+        "status": "PASS",
+        "trials": 1,
+        "detail": null,
+        "shrunk": null,
+        "duration_ms": 46,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-95bbf07fe4",
+        "predicate": "example_executable",
+        "status": "PASS",
+        "trials": 1,
+        "detail": null,
+        "shrunk": null,
+        "duration_ms": 45,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-691e311dfb",
+        "predicate": "example_executable",
+        "status": "FAIL",
+        "trials": 1,
+        "detail": null,
+        "shrunk": false,
+        "duration_ms": 47,
+        "finding": {
+          "law_id": "bde-law-691e311dfb",
+          "predicate": "example_executable",
+          "export": "wordSplit",
+          "args": [
+            "foo-bar_baz",
+            [
+              "-"
+            ]
+          ],
+          "original_args": [
+            "foo-bar_baz",
+            [
+              "-"
+            ]
+          ],
+          "shrunk": false,
+          "kind": "documented_result_mismatch",
+          "detail": "documented result [\"foo\",\"bar_baz\"], observed [\"foo\",\"bar\",\"_baz\"]",
+          "observed": [
+            "foo",
+            "bar",
+            "_baz"
+          ],
+          "expected": [
+            "foo",
+            "bar_baz"
+          ],
+          "first_failing_trial": 0,
+          "bde_status": "CONFIRMED_CONTRADICTION",
+          "law": {
+            "law_id": "bde-law-691e311dfb",
+            "statement": "A documented call wordSplit(['foo-bar_baz', ['-']]) must execute without throwing and return [\"foo\", \"bar_baz\"]",
+            "kind": "doc_example",
+            "predicate": "example_executable",
+            "module": "src/index.ts",
+            "export": "wordSplit",
+            "evidence_class": "B_GROUNDED",
+            "grounding": {
+              "source_type": "jsdoc",
+              "file": "src/index.ts",
+              "line_start": 6,
+              "line_end": 6,
+              "excerpt": "src/index.ts:6 documented call wordSplit('foo-bar_baz', ['-'])",
+              "sha256": "d43b08d190227906fd4e6736b1897bded6e5ad083236e3830df0852f94b4aa2e",
+              "revision": "HEAD",
+              "extracted": {
+                "args": [
+                  "foo-bar_baz",
+                  [
+                    "-"
+                  ]
+                ],
+                "expected_kind": "literal",
+                "expected_text": "[\"foo\", \"bar_baz\"]",
+                "expected_line": 7,
+                "context": "jsdoc",
+                "readme_section_param_count": 2
+              }
+            },
+            "approval": "qualified",
+            "confidence": 0.7,
+            "limitations": [],
+            "verification": {
+              "method": "execute the documented call in a disposable clone (tsx subprocess)"
+            },
+            "qualification": {
+              "rule": "Q1-doc-example",
+              "reasons": [
+                "documented result is machine-extractable (literal)"
+              ],
+              "from_class": "D_INFERRED",
+              "promoted_by": "authority.qualify/1 (deterministic)"
+            }
+          }
+        }
+      },
+      {
+        "law_id": "bde-law-c1faf93843",
+        "predicate": "split_boundary_justified",
+        "status": "FAIL",
+        "trials": 29,
+        "detail": null,
+        "shrunk": true,
+        "duration_ms": 48,
+        "finding": {
+          "law_id": "bde-law-c1faf93843",
+          "predicate": "split_boundary_justified",
+          "export": "wordSplit",
+          "args": [
+            "a1",
+            []
+          ],
+          "original_args": [
+            "aa1",
+            [
+              "_"
+            ]
+          ],
+          "shrunk": true,
+          "kind": "unjustified_boundary",
+          "detail": "boundary before input index 1: \"a\" | \"1\" \u2014 the character \"1\" after \"a\" is neither a listed separator ([]) nor a documented case change",
+          "observed": [
+            "a",
+            "1"
+          ],
+          "boundary_index": 1,
+          "boundary_char": "1",
+          "segment_before": "a",
+          "segment_after": "1",
+          "first_failing_trial": 27,
+          "bde_status": "CONFIRMED_CONTRADICTION",
+          "law": {
+            "law_id": "bde-law-c1faf93843",
+            "statement": "wordSplit may only start a new segment at a listed separator character or at a documented case change (lower\u2192upper or the upper-run\u2192lower rule); numbers/digits never cause a split; all other input characters must be preserved in order",
+            "kind": "split_boundary",
+            "predicate": "split_boundary_justified",
+            "module": "src/index.ts",
+            "export": "wordSplit",
+            "evidence_class": "B_GROUNDED",
+            "grounding": {
+              "source_type": "readme_section",
+              "file": "README.md",
+              "line_start": 7,
+              "line_end": 20,
+              "excerpt": "- Splits string by the separators provided\n- Splits when case changes from lower to upper or upper to lower\n- Ignores numbers for case changes\n- Case is preserved in returned value",
+              "sha256": "6da8e38c9a6ae87aa4b513c42589ea7b4960ba4e77a81e0fce40c76acd948aae",
+              "revision": "HEAD",
+              "extracted": {
+                "causes": [
+                  "listed_separator",
+                  "case_change"
+                ],
+                "default_separators": null,
+                "default_separators_provenance": "unknown",
+                "digits_ignored": true,
+                "case_preserved": true,
+                "signature_params": [
+                  [
+                    "input",
+                    true,
+                    null
+                  ],
+                  [
+                    "separators",
+                    true,
+                    null
+                  ]
+                ]
+              }
+            },
+            "approval": "qualified",
+            "confidence": 0.65,
+            "limitations": [
+              "boundary justification checks the documented causes only; exotic documented behaviour outside the README section is out of scope",
+              "the upper-run\u2192lower rule encodes the standard word-splitting semantics of a 'case change from upper to lower'"
+            ],
+            "verification": {
+              "method": "generated strings + separator lists; boundary-position justification checked against the input"
+            },
+            "qualification": {
+              "rule": "Q2-splitter-boundary",
+              "reasons": [
+                "both boundary causes matched verbatim from README bullets",
+                "signature corroborates splitter shape: [('input', True, None), ('separators', True, None)]"
+              ],
+              "from_class": "D_INFERRED",
+              "promoted_by": "authority.qualify/1 (deterministic)"
+            }
+          }
+        }
+      },
+      {
+        "law_id": "bde-law-6f68220dbe",
+        "predicate": "optional_args_equivalent",
+        "status": "PASS",
+        "trials": 200,
+        "detail": null,
+        "shrunk": null,
+        "duration_ms": 45,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-26e38ab9dd",
+        "predicate": "determinism",
+        "status": "PASS",
+        "trials": 1,
+        "detail": null,
+        "shrunk": null,
+        "duration_ms": 47,
+        "finding": null
+      }
+    ],
+    "findings": [
+      {
+        "law_id": "bde-law-691e311dfb",
+        "predicate": "example_executable",
+        "export": "wordSplit",
+        "args": [
+          "foo-bar_baz",
+          [
+            "-"
+          ]
+        ],
+        "original_args": [
+          "foo-bar_baz",
+          [
+            "-"
+          ]
+        ],
+        "shrunk": false,
+        "kind": "documented_result_mismatch",
+        "detail": "documented result [\"foo\",\"bar_baz\"], observed [\"foo\",\"bar\",\"_baz\"]",
+        "observed": [
+          "foo",
+          "bar",
+          "_baz"
+        ],
+        "expected": [
+          "foo",
+          "bar_baz"
+        ],
+        "first_failing_trial": 0,
+        "bde_status": "CONFIRMED_CONTRADICTION",
+        "law": {
+          "law_id": "bde-law-691e311dfb",
+          "statement": "A documented call wordSplit(['foo-bar_baz', ['-']]) must execute without throwing and return [\"foo\", \"bar_baz\"]",
+          "kind": "doc_example",
+          "predicate": "example_executable",
+          "module": "src/index.ts",
+          "export": "wordSplit",
+          "evidence_class": "B_GROUNDED",
+          "grounding": {
+            "source_type": "jsdoc",
+            "file": "src/index.ts",
+            "line_start": 6,
+            "line_end": 6,
+            "excerpt": "src/index.ts:6 documented call wordSplit('foo-bar_baz', ['-'])",
+            "sha256": "d43b08d190227906fd4e6736b1897bded6e5ad083236e3830df0852f94b4aa2e",
+            "revision": "HEAD",
+            "extracted": {
+              "args": [
+                "foo-bar_baz",
+                [
+                  "-"
+                ]
+              ],
+              "expected_kind": "literal",
+              "expected_text": "[\"foo\", \"bar_baz\"]",
+              "expected_line": 7,
+              "context": "jsdoc",
+              "readme_section_param_count": 2
+            }
+          },
+          "approval": "qualified",
+          "confidence": 0.7,
+          "limitations": [],
+          "verification": {
+            "method": "execute the documented call in a disposable clone (tsx subprocess)"
+          },
+          "qualification": {
+            "rule": "Q1-doc-example",
+            "reasons": [
+              "documented result is machine-extractable (literal)"
+            ],
+            "from_class": "D_INFERRED",
+            "promoted_by": "authority.qualify/1 (deterministic)"
+          }
+        }
+      },
+      {
+        "law_id": "bde-law-c1faf93843",
+        "predicate": "split_boundary_justified",
+        "export": "wordSplit",
+        "args": [
+          "a1",
+          []
+        ],
+        "original_args": [
+          "aa1",
+          [
+            "_"
+          ]
+        ],
+        "shrunk": true,
+        "kind": "unjustified_boundary",
+        "detail": "boundary before input index 1: \"a\" | \"1\" \u2014 the character \"1\" after \"a\" is neither a listed separator ([]) nor a documented case change",
+        "observed": [
+          "a",
+          "1"
+        ],
+        "boundary_index": 1,
+        "boundary_char": "1",
+        "segment_before": "a",
+        "segment_after": "1",
+        "first_failing_trial": 27,
+        "bde_status": "CONFIRMED_CONTRADICTION",
+        "law": {
+          "law_id": "bde-law-c1faf93843",
+          "statement": "wordSplit may only start a new segment at a listed separator character or at a documented case change (lower\u2192upper or the upper-run\u2192lower rule); numbers/digits never cause a split; all other input characters must be preserved in order",
+          "kind": "split_boundary",
+          "predicate": "split_boundary_justified",
+          "module": "src/index.ts",
+          "export": "wordSplit",
+          "evidence_class": "B_GROUNDED",
+          "grounding": {
+            "source_type": "readme_section",
+            "file": "README.md",
+            "line_start": 7,
+            "line_end": 20,
+            "excerpt": "- Splits string by the separators provided\n- Splits when case changes from lower to upper or upper to lower\n- Ignores numbers for case changes\n- Case is preserved in returned value",
+            "sha256": "6da8e38c9a6ae87aa4b513c42589ea7b4960ba4e77a81e0fce40c76acd948aae",
+            "revision": "HEAD",
+            "extracted": {
+              "causes": [
+                "listed_separator",
+                "case_change"
+              ],
+              "default_separators": null,
+              "default_separators_provenance": "unknown",
+              "digits_ignored": true,
+              "case_preserved": true,
+              "signature_params": [
+                [
+                  "input",
+                  true,
+                  null
+                ],
+                [
+                  "separators",
+                  true,
+                  null
+                ]
+              ]
+            }
+          },
+          "approval": "qualified",
+          "confidence": 0.65,
+          "limitations": [
+            "boundary justification checks the documented causes only; exotic documented behaviour outside the README section is out of scope",
+            "the upper-run\u2192lower rule encodes the standard word-splitting semantics of a 'case change from upper to lower'"
+          ],
+          "verification": {
+            "method": "generated strings + separator lists; boundary-position justification checked against the input"
+          },
+          "qualification": {
+            "rule": "Q2-splitter-boundary",
+            "reasons": [
+              "both boundary causes matched verbatim from README bullets",
+              "signature corroborates splitter shape: [('input', True, None), ('separators', True, None)]"
+            ],
+            "from_class": "D_INFERRED",
+            "promoted_by": "authority.qualify/1 (deterministic)"
+          }
+        }
+      },
+      {
+        "law_id": "bde-law-c1faf93843",
+        "predicate": "split_boundary_justified",
+        "export": "wordSplit",
+        "args": [
+          "a1",
+          []
+        ],
+        "original_args": [
+          "aa1",
+          [
+            "-"
+          ]
+        ],
+        "shrunk": true,
+        "kind": "unjustified_boundary",
+        "detail": "boundary before input index 1: \"a\" | \"1\" \u2014 the character \"1\" after \"a\" is neither a listed separator ([]) nor a documented case change",
+        "observed": [
+          "a",
+          "1"
+        ],
+        "boundary_index": 1,
+        "boundary_char": "1",
+        "segment_before": "a",
+        "segment_after": "1",
+        "first_failing_trial": 28,
+        "bde_status": "CONFIRMED_CONTRADICTION",
+        "law": {
+          "law_id": "bde-law-c1faf93843",
+          "statement": "wordSplit may only start a new segment at a listed separator character or at a documented case change (lower\u2192upper or the upper-run\u2192lower rule); numbers/digits never cause a split; all other input characters must be preserved in order",
+          "kind": "split_boundary",
+          "predicate": "split_boundary_justified",
+          "module": "src/index.ts",
+          "export": "wordSplit",
+          "evidence_class": "B_GROUNDED",
+          "grounding": {
+            "source_type": "readme_section",
+            "file": "README.md",
+            "line_start": 7,
+            "line_end": 20,
+            "excerpt": "- Splits string by the separators provided\n- Splits when case changes from lower to upper or upper to lower\n- Ignores numbers for case changes\n- Case is preserved in returned value",
+            "sha256": "6da8e38c9a6ae87aa4b513c42589ea7b4960ba4e77a81e0fce40c76acd948aae",
+            "revision": "HEAD",
+            "extracted": {
+              "causes": [
+                "listed_separator",
+                "case_change"
+              ],
+              "default_separators": null,
+              "default_separators_provenance": "unknown",
+              "digits_ignored": true,
+              "case_preserved": true,
+              "signature_params": [
+                [
+                  "input",
+                  true,
+                  null
+                ],
+                [
+                  "separators",
+                  true,
+                  null
+                ]
+              ]
+            }
+          },
+          "approval": "qualified",
+          "confidence": 0.65,
+          "limitations": [
+            "boundary justification checks the documented causes only; exotic documented behaviour outside the README section is out of scope",
+            "the upper-run\u2192lower rule encodes the standard word-splitting semantics of a 'case change from upper to lower'"
+          ],
+          "verification": {
+            "method": "generated strings + separator lists; boundary-position justification checked against the input"
+          },
+          "qualification": {
+            "rule": "Q2-splitter-boundary",
+            "reasons": [
+              "both boundary causes matched verbatim from README bullets",
+              "signature corroborates splitter shape: [('input', True, None), ('separators', True, None)]"
+            ],
+            "from_class": "D_INFERRED",
+            "promoted_by": "authority.qualify/1 (deterministic)"
+          }
+        }
+      },
+      {
+        "law_id": "bde-law-c1faf93843",
+        "predicate": "split_boundary_justified",
+        "export": "wordSplit",
+        "args": [
+          "a1",
+          []
+        ],
+        "original_args": [
+          "aa1",
+          [
+            ".",
+            "/"
+          ]
+        ],
+        "shrunk": true,
+        "kind": "unjustified_boundary",
+        "detail": "boundary before input index 1: \"a\" | \"1\" \u2014 the character \"1\" after \"a\" is neither a listed separator ([]) nor a documented case change",
+        "observed": [
+          "a",
+          "1"
+        ],
+        "boundary_index": 1,
+        "boundary_char": "1",
+        "segment_before": "a",
+        "segment_after": "1",
+        "first_failing_trial": 29,
+        "bde_status": "CONFIRMED_CONTRADICTION",
+        "law": {
+          "law_id": "bde-law-c1faf93843",
+          "statement": "wordSplit may only start a new segment at a listed separator character or at a documented case change (lower\u2192upper or the upper-run\u2192lower rule); numbers/digits never cause a split; all other input characters must be preserved in order",
+          "kind": "split_boundary",
+          "predicate": "split_boundary_justified",
+          "module": "src/index.ts",
+          "export": "wordSplit",
+          "evidence_class": "B_GROUNDED",
+          "grounding": {
+            "source_type": "readme_section",
+            "file": "README.md",
+            "line_start": 7,
+            "line_end": 20,
+            "excerpt": "- Splits string by the separators provided\n- Splits when case changes from lower to upper or upper to lower\n- Ignores numbers for case changes\n- Case is preserved in returned value",
+            "sha256": "6da8e38c9a6ae87aa4b513c42589ea7b4960ba4e77a81e0fce40c76acd948aae",
+            "revision": "HEAD",
+            "extracted": {
+              "causes": [
+                "listed_separator",
+                "case_change"
+              ],
+              "default_separators": null,
+              "default_separators_provenance": "unknown",
+              "digits_ignored": true,
+              "case_preserved": true,
+              "signature_params": [
+                [
+                  "input",
+                  true,
+                  null
+                ],
+                [
+                  "separators",
+                  true,
+                  null
+                ]
+              ]
+            }
+          },
+          "approval": "qualified",
+          "confidence": 0.65,
+          "limitations": [
+            "boundary justification checks the documented causes only; exotic documented behaviour outside the README section is out of scope",
+            "the upper-run\u2192lower rule encodes the standard word-splitting semantics of a 'case change from upper to lower'"
+          ],
+          "verification": {
+            "method": "generated strings + separator lists; boundary-position justification checked against the input"
+          },
+          "qualification": {
+            "rule": "Q2-splitter-boundary",
+            "reasons": [
+              "both boundary causes matched verbatim from README bullets",
+              "signature corroborates splitter shape: [('input', True, None), ('separators', True, None)]"
+            ],
+            "from_class": "D_INFERRED",
+            "promoted_by": "authority.qualify/1 (deterministic)"
+          }
+        }
+      }
+    ],
+    "runner_error": null,
+    "duration_ms": 457
+  },
+  "node22-native-strip-False": {
+    "module": "src/index.ts",
+    "revision": "HEAD",
+    "executed": 0,
+    "passed": 0,
+    "failed": 0,
+    "errors": 6,
+    "skipped": 0,
+    "not_run": 0,
+    "outcomes": [
+      {
+        "law_id": "bde-law-6524cfa5f3",
+        "predicate": "example_executable",
+        "status": "ERROR",
+        "trials": 0,
+        "detail": "TypeError: Unknown file extension \".ts\" for $WORK/baseline/py312-node20/test_discover_finds_the_defect0/repo/src/index.ts",
+        "shrunk": null,
+        "duration_ms": 32,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-95bbf07fe4",
+        "predicate": "example_executable",
+        "status": "ERROR",
+        "trials": 0,
+        "detail": "TypeError: Unknown file extension \".ts\" for $WORK/baseline/py312-node20/test_discover_finds_the_defect0/repo/src/index.ts",
+        "shrunk": null,
+        "duration_ms": 31,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-691e311dfb",
+        "predicate": "example_executable",
+        "status": "ERROR",
+        "trials": 0,
+        "detail": "TypeError: Unknown file extension \".ts\" for $WORK/baseline/py312-node20/test_discover_finds_the_defect0/repo/src/index.ts",
+        "shrunk": null,
+        "duration_ms": 32,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-c1faf93843",
+        "predicate": "split_boundary_justified",
+        "status": "ERROR",
+        "trials": 0,
+        "detail": "TypeError: Unknown file extension \".ts\" for $WORK/baseline/py312-node20/test_discover_finds_the_defect0/repo/src/index.ts",
+        "shrunk": null,
+        "duration_ms": 32,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-6f68220dbe",
+        "predicate": "optional_args_equivalent",
+        "status": "ERROR",
+        "trials": 0,
+        "detail": "TypeError: Unknown file extension \".ts\" for $WORK/baseline/py312-node20/test_discover_finds_the_defect0/repo/src/index.ts",
+        "shrunk": null,
+        "duration_ms": 32,
+        "finding": null
+      },
+      {
+        "law_id": "bde-law-26e38ab9dd",
+        "predicate": "determinism",
+        "status": "ERROR",
+        "trials": 0,
+        "detail": "TypeError: Unknown file extension \".ts\" for $WORK/baseline/py312-node20/test_discover_finds_the_defect0/repo/src/index.ts",
+        "shrunk": null,
+        "duration_ms": 33,
+        "finding": null
+      }
+    ],
+    "findings": [],
+    "runner_error": null,
+    "duration_ms": 308
+  }
+}

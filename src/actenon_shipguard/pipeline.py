@@ -85,6 +85,10 @@ def _init_repo(tmp: Path, candidate: Path) -> Path:
     (repo / "src").mkdir(parents=True)
     shutil.copy(candidate, repo / MODULE)
     (repo / "package.json").write_text(json.dumps({"name": "t", "type": "module"}))
+    # Umask-independence (see orchestrator.sync_file_modes_to_index): a copy made under umask 002
+    # carries 0664 mode bits that turn every file into a mode-only "change" for the snapshot diff.
+    (repo / MODULE).chmod(0o644)
+    (repo / "package.json").chmod(0o644)
     for args in (["init", "-q"], ["config", "user.email", "t@t.local"], ["config", "user.name", "t"],
                  ["add", "-A"], ["commit", "-qm", "candidate"]):
         subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)

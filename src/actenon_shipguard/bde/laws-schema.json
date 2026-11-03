@@ -1,0 +1,140 @@
+{
+  "$id": "actenon-shipguard/bde/lawpack/1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "module",
+    "laws"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "module": {
+      "type": "string"
+    },
+    "git_revision": {
+      "type": "string"
+    },
+    "laws": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "law_id",
+          "statement",
+          "kind",
+          "predicate",
+          "module",
+          "export",
+          "params",
+          "domain",
+          "evidence_class",
+          "grounding",
+          "approval"
+        ],
+        "properties": {
+          "law_id": {
+            "type": "string",
+            "pattern": "^bde-law-[0-9a-f]{10}$"
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 8
+          },
+          "kind": {
+            "type": "string"
+          },
+          "predicate": {
+            "enum": [
+              "example_executable",
+              "preservation_case",
+              "optional_args_equivalent",
+              "split_boundary_justified",
+              "round_trip",
+              "idempotence",
+              "conservation_sum",
+              "determinism",
+              "no_throw"
+            ]
+          },
+          "module": {
+            "type": "string"
+          },
+          "export": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object"
+          },
+          "domain": {
+            "type": "object"
+          },
+          "evidence_class": {
+            "enum": [
+              "A_AUTHORITATIVE",
+              "B_GROUNDED",
+              "C_PRESERVATION",
+              "D_INFERRED"
+            ]
+          },
+          "approval": {
+            "enum": [
+              "approved",
+              "qualified",
+              "unapproved",
+              "rejected"
+            ]
+          },
+          "grounding": {
+            "type": "object",
+            "required": [
+              "source_type",
+              "file",
+              "line_start",
+              "line_end",
+              "excerpt",
+              "sha256",
+              "revision"
+            ],
+            "properties": {
+              "source_type": {
+                "enum": [
+                  "readme_section",
+                  "jsdoc",
+                  "signature",
+                  "test_assertion",
+                  "developer_policy",
+                  "approved_contract",
+                  "structural_pair",
+                  "reference_implementation"
+                ]
+              },
+              "file": {
+                "type": "string"
+              },
+              "line_start": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "line_end": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "excerpt": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "revision": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
