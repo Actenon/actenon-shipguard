@@ -61,6 +61,7 @@ actenon_shipguard = [
 testpaths = ["tests"]
 addopts = "-ra"
 markers = [
+  "bde_containment: mandatory Docker boundary probes in the dedicated CI job",
   "sentinel_integration: requires the real Sentinel CLI + node_modules(vitest); run in the dedicated CI integration job",
 ]
 

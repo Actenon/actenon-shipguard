@@ -63,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          pytest -q -rs -m "not sentinel_integration" 2>&1 | tee /tmp/pytest.txt
+          pytest -q -rs -m "not sentinel_integration and not bde_containment" 2>&1 | tee /tmp/pytest.txt
           code=${PIPESTATUS[0]}
           set -e
           echo "pytest exit code: $code"
@@ -212,3 +212,28 @@ jobs:
           test "$code" -eq 0 || { echo "ERROR: pytest failed (exit $code)"; exit "$code"; }
           grep -qE "[1-9][0-9]* passed" /tmp/it.txt
           if grep -qE "skipped" /tmp/it.txt; then echo "ERROR: integration tests skipped (sentinel missing)"; exit 1; fi
+
+
+  bde-containment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build pinned containment runtime and install test dependencies
+        run: |
+          set -euo pipefail
+          pip install -e '.[dev]'
+          docker build -t shipguard-bde-ci docker/bde
+          echo "SHIPGUARD_BDE_IMAGE=$(docker image inspect shipguard-bde-ci --format '{{.Id}}')" >> "$GITHUB_ENV"
+      - name: Independent containment negative controls (no skips)
+        run: |
+          set -euo pipefail
+          set +e
+          pytest -q -rs -m bde_containment | tee /tmp/containment.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          test "$code" -eq 0 || exit "$code"
+          grep -qE "[1-9][0-9]* passed" /tmp/containment.txt
+          if grep -qE "skipped" /tmp/containment.txt; then exit 1; fi

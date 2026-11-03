@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .laws import CLASS_B, CLASS_C, CLASS_D, BehaviouralLaw
+from .laws import CLASS_C, CLASS_D, BehaviouralLaw
 from .sources import EvidenceBundle, LiteralError, Signature, parse_literal
 
 # -------------------------------------------------------------------------------------------- #
@@ -271,8 +271,10 @@ def _optional_arg_laws(bundle: EvidenceBundle, sig: Signature) -> list[Behaviour
     if not optional_tail or n_required < 0:
         return laws
     literal_defaults: list[Any] = []
+    default_omissions: list[bool] = []
     all_literal = True
     for p in optional_tail:
+        default_omissions.append(p.default_text is None or p.default_text.strip() == "undefined")
         if p.default_text is None:
             literal_defaults.append(None)
             continue
@@ -288,6 +290,7 @@ def _optional_arg_laws(bundle: EvidenceBundle, sig: Signature) -> list[Behaviour
         extracted={"params": [(p.name, p.optional, p.default_text, p.type_text) for p in sig.params],
                    "n_required": n_required})
     params: dict[str, Any] = {"n_required": n_required, "defaults": literal_defaults if all_literal else None,
+                              "default_omissions": default_omissions,
                               "check": "no_throw_and_equal"}
     laws.append(BehaviouralLaw(
         law_id=BehaviouralLaw.new_id(),
@@ -295,9 +298,11 @@ def _optional_arg_laws(bundle: EvidenceBundle, sig: Signature) -> list[Behaviour
                    f"signature, so calling it with only the required arguments must be supported"),
         kind="optional_args", predicate="optional_args_equivalent",
         module=bundle.module, export=sig.export, params=params,
-        domain={"trials": 200, "seed": 20261103, "arg_shapes": "derived_from_signature"},
-        evidence_class=CLASS_B, grounding=g, confidence=0.75,
-        limitations=["equivalence is compared deeply; non-literal default expressions fall back to a "
+        domain={"trials": 200, "seed": 20261103,
+                "required_types": [p.type_text for p in sig.params[:n_required]]},
+        evidence_class=CLASS_D, grounding=g, confidence=0.75,
+        limitations=["a signature does not establish totality or equivalence on generated inputs; requires review",
+                     "equivalence is compared deeply; non-literal default expressions fall back to a "
                      "no-throw check on the required-arguments call"],
         verification={"method": "call with required args only (must not throw); when defaults are literal, "
                                 "compare against the call with explicit defaults"},
@@ -503,6 +508,7 @@ def compile_laws(bundle: EvidenceBundle, *, exports_of_interest: list[str] | Non
     seen: dict[str, BehaviouralLaw] = {}
     for law in laws:
         d = law.digest()
+        law.law_id = f"bde-law-{d[:10]}"
         if d not in seen:
             seen[d] = law
     out = list(seen.values())

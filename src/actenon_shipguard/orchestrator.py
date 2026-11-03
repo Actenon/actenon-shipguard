@@ -18,18 +18,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .adapters.base import AgentResult
-from .sentinel import (bind_committed_tree, find_sentinel, is_dependency_path, is_test_path,
-                       run_sentinel_verify)
+from .sentinel import (
+    bind_committed_tree,
+    find_sentinel,
+    is_dependency_path,
+    is_test_path,
+    run_sentinel_verify,
+)
 from .trust import sha256_hex
 
 FIXTURES = Path(__file__).resolve().parent / "_bundled"
@@ -160,13 +166,24 @@ def repo_fingerprint(repo: Path) -> dict[str, Any]:
     head = git_head(repo)
     dirty = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
                            capture_output=True, text=True).stdout.strip()
-    tracked = subprocess.run(["git", "-C", str(repo), "ls-files"],
-                             capture_output=True, text=True).stdout.split()
+    tracked = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"],
+                             capture_output=True, text=True, check=True).stdout.rstrip("\0").split("\0")
+    tracked = [rel for rel in tracked if rel]
     h = hashlib.sha256()
     for rel in sorted(tracked):
         p = repo / rel
-        h.update(rel.encode("utf-8"))
-        h.update(p.read_bytes() if p.exists() else b"<missing>")
+        name = rel.encode("utf-8")
+        if p.is_symlink():
+            data = b"symlink:" + os.readlink(p).encode("utf-8")
+        elif p.is_file():
+            data = b"file:" + (b"x:" if p.stat().st_mode & 0o111 else b"-:") + p.read_bytes()
+        else:
+            data = b"<missing-or-submodule>"
+        # Length framing prevents ambiguous path/content concatenations.
+        h.update(len(name).to_bytes(8, "big"))
+        h.update(name)
+        h.update(len(data).to_bytes(8, "big"))
+        h.update(data)
     return {"head": head, "dirty": dirty, "tracked_files": len(tracked),
             "tracked_content_sha256": h.hexdigest()}
 

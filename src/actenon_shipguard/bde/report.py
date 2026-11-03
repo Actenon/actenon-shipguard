@@ -64,7 +64,7 @@ def terminal_summary(result: BDEResult) -> str:
         ap("REGRESSION_OBSERVED — approved preservation behaviour changed.")
     elif result.overall_status == STATUS_CONFIRMED:
         ap(f"CONFIRMED_CONTRADICTION — {sum(1 for f in result.findings if f.bde_status == STATUS_CONFIRMED)} "
-           f"grounded law(s) violated with reproducible witnesses. Recommendation: BLOCK this change.")
+           f"grounded finding(s) with witnesses. Review intended behaviour before approving a repair or gate.")
     elif result.overall_status == "INSUFFICIENT":
         ap("INSUFFICIENT_EVIDENCE — the available evidence does not establish correctness.")
         for note in result.notes[:3]:

@@ -243,6 +243,7 @@ def test_only_qualified_laws_block():
     qualify([d_law], Policy())
     assert not d_law.is_blocking
     b_law = _law(evidence_class=CLASS_B)
+    b_law.grounding.extracted = {"expected_kind": "literal"}
     qualify([b_law], Policy(allow_class_b_blocking=True))
     assert b_law.is_blocking and b_law.approval == QUALIFIED
     c_law = _law(evidence_class=CLASS_C)
@@ -257,7 +258,7 @@ def test_class_a_requires_real_approval():
 
 
 # ---------------------------------------------------------------------------------------------- #
-# integration — end-to-end blind discovery on the hermetic defect
+# integration — end-to-end discovery on a known fixture on the hermetic defect
 # ---------------------------------------------------------------------------------------------- #
 @needs_tsx
 def test_discover_finds_the_defect_end_to_end(defect_repo, tmp_path):
@@ -266,7 +267,7 @@ def test_discover_finds_the_defect_end_to_end(defect_repo, tmp_path):
     laws = compile_laws(b, include_preservation=False)
     annotate_section_arity(laws, b)
     qualify(laws, Policy())
-    assert any(lw.kind == "split_boundary" and lw.is_blocking for lw in laws)
+    assert any(lw.kind == "split_boundary" and not lw.is_blocking for lw in laws)
     pack, problems = build_lawpack(laws, "src/index.ts", "HEAD", defect_repo)
     assert pack is not None, problems
     meta = {lw.law_id: lw for lw in laws}
@@ -480,3 +481,88 @@ def test_import_failure_is_visible_as_environment_failure(defect_repo, tmp_path)
     assert result.findings == []
     assert any("missing-dependency" in (o.detail or "") for o in result.outcomes)
     assert "missing-dependency" in json.dumps(result.notes)
+
+
+@needs_tsx
+@pytest.mark.parametrize("source", [
+    'export function square(value: number, digits = 2): number { if (typeof value !== "number") throw new TypeError("number required"); return Number((value * value).toFixed(digits)); }',
+    'export function render(value: string, mode?: string): string { return mode === undefined ? value : value + ":" + mode; }',
+])
+def test_optional_arguments_do_not_invent_invalid_domains_or_null_defaults(tmp_path, source):
+    from actenon_shipguard.bde.check import run_bde
+    repo = _make_repo(tmp_path / "repo", readme="# valid API", module_src=source)
+    result = run_bde(repo, module="src/index.ts", out_dir=tmp_path / "out",
+                     tsx_path=str(TSX), allow_local=True, work_dir=tmp_path / "work")
+    assert result.errors == 0
+    assert not result.findings, [f.to_dict() for f in result.findings]
+
+
+def test_disabling_grounded_laws_also_disables_promotion(defect_repo):
+    bundle = collect(defect_repo, "src/index.ts", "HEAD")
+    laws = compile_laws(bundle, include_preservation=False)
+    qualify(laws, Policy(allow_class_b_blocking=False))
+    assert not any(law.is_blocking for law in laws)
+
+
+@needs_tsx
+def test_standalone_example_witness_fails_on_result_mismatch(defect_repo, tmp_path):
+    from actenon_shipguard.bde.check import run_bde
+    result = run_bde(defect_repo, module="src/index.ts", out_dir=tmp_path / "out",
+                     tsx_path=str(TSX), allow_local=True, work_dir=tmp_path / "work")
+    finding = next(f for f in result.findings if f.kind == "documented_result_mismatch")
+    script = tmp_path / "out" / f"bde-repro-{finding.finding_id}.mjs"
+    proc = subprocess.run([str(TSX), str(script)], cwd=defect_repo, capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "RECORDED LAW VIOLATED" in proc.stdout
+
+
+def test_repair_requires_external_approval_before_agent_execution(capsys):
+    from argparse import Namespace
+
+    from actenon_shipguard.cli import cmd_repair
+    assert cmd_repair(Namespace(contract=None)) == 2
+    assert "independently approved" in capsys.readouterr().err
+
+
+def test_reproduction_requires_execution_consent(monkeypatch, capsys):
+    from argparse import Namespace
+
+    from actenon_shipguard.cli import cmd_reproduce
+    monkeypatch.delenv("SHIPGUARD_ALLOW_LOCAL", raising=False)
+    assert cmd_reproduce(Namespace(allow_local=False)) == 2
+    assert "trusted code" in capsys.readouterr().err
+
+
+def test_compiled_law_identity_is_reproducible(defect_repo):
+    bundle = collect(defect_repo, "src/index.ts", "HEAD")
+    first = compile_laws(bundle)
+    second = compile_laws(bundle)
+    assert [law.to_dict() for law in first] == [law.to_dict() for law in second]
+
+
+def test_source_identity_binds_files_with_spaces(defect_repo):
+    from actenon_shipguard.orchestrator import repo_fingerprint
+    target = defect_repo / "src/with spaces.ts"
+    target.write_text("export const value = 1;\n")
+    subprocess.run(["git", "add", "src/with spaces.ts"], cwd=defect_repo, check=True)
+    before = repo_fingerprint(defect_repo)["tracked_content_sha256"]
+    target.write_text("export const value = 2;\n")
+    assert repo_fingerprint(defect_repo)["tracked_content_sha256"] != before
+
+
+@needs_tsx
+def test_reproduction_uses_exact_witness_and_refuses_changed_dependencies(defect_repo, tmp_path, capsys):
+    from argparse import Namespace
+
+    from actenon_shipguard.bde.check import run_bde
+    from actenon_shipguard.cli import cmd_reproduce
+    result = run_bde(defect_repo, module="src/index.ts", out_dir=tmp_path / "out",
+                     tsx_path=str(TSX), allow_local=True, work_dir=tmp_path / "work")
+    finding = next(f for f in result.findings if f.kind == "documented_result_mismatch")
+    args = Namespace(finding_id=finding.finding_id, evidence=str(tmp_path / "out"),
+                     repo=str(defect_repo), tsx=str(TSX), allow_local=True, runner="local", image=None)
+    assert cmd_reproduce(args) == 0
+    assert "trials=1" in capsys.readouterr().out
+    (defect_repo / "README.md").write_text("changed dependency of the recorded law")
+    assert cmd_reproduce(args) == 2
+    assert "identity differs" in capsys.readouterr().err

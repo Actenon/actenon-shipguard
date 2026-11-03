@@ -68,3 +68,10 @@ Machine-readable baseline, errors and repaired matrix: `evidence/phase0/`.
 Remote validation is pending this commit's CI; local results do not establish
 remote green status. No merge, release or product-value claim is authorised by
 these runtime checks.
+
+## Remote verification
+
+Commit `8bc815cb3586374ff8672bd2f20366fbb71a7666` passed all five jobs in
+[GitHub Actions run 41706606243](https://github.com/Actenon/actenon-shipguard/actions/runs/41706606243):
+four Python 3.11/3.12 × Node 20.20.2/22.23.4 jobs (including CLI smoke and
+non-editable wheel execution), plus the real Sentinel integration job.

@@ -9,6 +9,7 @@ never as behavioural findings.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import uuid
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from . import strategies
+from .isolation import ExecutionLimitError, bounded_run, docker_command
 from .laws import CLASS_C, BehaviouralLaw, lawpack_for, validate_lawpack
 
 RUNNER = Path(__file__).resolve().parent / "runner.mjs"
@@ -60,6 +62,8 @@ class ExecutionReport:
     findings: list[dict[str, Any]] = field(default_factory=list)
     runner_error: str | None = None
     duration_ms: int = 0
+    execution_boundary: str = "local-advisory"
+    runtime_image: str | None = None
 
     def outcomes_for(self, law_id: str) -> LawOutcome | None:
         return next((o for o in self.outcomes if o.law_id == law_id), None)
@@ -86,6 +90,9 @@ def build_lawpack(laws: list[BehaviouralLaw], module: str, revision: str,
         # stale-evidence guard: the grounding hash must match the file about to be executed
         g = law.grounding
         target = repo / g.file if g.file else None
+        if target is None or not target.is_file() or not target.resolve().is_relative_to(repo.resolve()):
+            problems.append(f"{law.law_id}: missing or out-of-repository grounding file")
+            continue
         if target is not None and target.is_file():
             import hashlib
             actual = hashlib.sha256(target.read_bytes()).hexdigest()
@@ -104,39 +111,63 @@ def build_lawpack(laws: list[BehaviouralLaw], module: str, revision: str,
     return pack, problems
 
 
-def run_lawpack(pack: dict[str, Any], repo: Path, tsx: Path, *, per_law_ms: int = 10000,
+def run_lawpack(pack: dict[str, Any], repo: Path, tsx: Path | None, *, per_law_ms: int = 10000,
                 timeout_s: int = 900, laws_meta: dict[str, BehaviouralLaw] | None = None,
-                mode: str = "discover") -> ExecutionReport:
+                mode: str = "discover", runner: str = "local", image: str | None = None,
+                max_output_bytes: int = 4_000_000) -> ExecutionReport:
     """Execute a validated lawpack in the disposable ``repo`` clone. Deterministic seeds."""
     import time
     started = time.monotonic()
     revision = str(pack.get("git_revision", ""))
     rep = ExecutionReport(module=str(pack.get("module", "")), revision=revision)
-    if not tsx.exists():
+    if runner not in ("local", "docker"):
+        rep.runner_error = "unsupported execution boundary"
+        rep.not_run = len(pack.get("laws") or [])
+        return rep
+    if runner == "local" and (tsx is None or not tsx.exists()):
         rep.runner_error = f"tsx runner not found at {tsx}"
         rep.not_run = len(pack.get("laws") or [])
         return rep
     work = Path(repo).parent / f"bde-pack-{uuid.uuid4().hex[:8]}.json"
     work.parent.mkdir(parents=True, exist_ok=True)
     work.write_text(json.dumps(pack))
+    container_name = f"shipguard-bde-{uuid.uuid4().hex}"
     try:
-        proc = subprocess.run([str(tsx), str(RUNNER), "--tsx", str(tsx.resolve()),
-                               "--lawpack", str(work), "--repo", str(repo),
-                               "--per-law-ms", str(per_law_ms)],
-                              capture_output=True, text=True, timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        rep.runner_error = f"lawpack execution exceeded {timeout_s}s"
+        if runner == "docker":
+            rep.execution_boundary = "docker-contained"
+            rep.runtime_image = image or os.environ.get("SHIPGUARD_BDE_IMAGE", "")
+            command = docker_command(image=rep.runtime_image, name=container_name,
+                                     repo=repo, pack=work, runner=RUNNER, per_law_ms=per_law_ms)
+        else:
+            command = [str(tsx), str(RUNNER), "--tsx", str(tsx.resolve()),
+                       "--lawpack", str(work), "--repo", str(repo), "--per-law-ms", str(per_law_ms)]
+        proc = bounded_run(command, timeout_s=timeout_s, max_output_bytes=max_output_bytes)
+    except (OSError, ValueError, ExecutionLimitError, subprocess.TimeoutExpired) as error:
+        rep.runner_error = f"{runner} execution failed: {error}"
         rep.not_run = len(pack.get("laws") or [])
-        work.unlink(missing_ok=True)
         return rep
     finally:
-        pass
-    work.unlink(missing_ok=True)
+        work.unlink(missing_ok=True)
+        if runner == "docker":
+            try:
+                subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                rep.runner_error = "container cleanup could not be confirmed"
     try:
         out = json.loads(proc.stdout)
     except json.JSONDecodeError:
         rep.runner_error = f"runner output was not JSON (exit {proc.returncode}): {proc.stderr[-400:]}"
         rep.not_run = len(pack.get("laws") or [])
+        return rep
+    expected_ids = [r["law_id"] for r in pack.get("laws", [])]
+    results = out.get("law_results") if isinstance(out, dict) else None
+    actual_ids = [r.get("law_id") for r in results if isinstance(r, dict)] if isinstance(results, list) else []
+    if (proc.returncode not in (0, 1, 2) or not isinstance(results, list)
+            or any(not isinstance(r, dict) for r in results) or len(actual_ids) != len(expected_ids)
+            or len(set(actual_ids)) != len(actual_ids) or set(actual_ids) != set(expected_ids)
+            or any(r.get("status") not in ("PASS", "FAIL", "ERROR", "SKIP") for r in results)):
+        rep.runner_error = "runner protocol failure: missing, duplicate or invalid mandatory law outcomes"
+        rep.not_run = len(expected_ids)
         return rep
     meta = laws_meta or {}
     findings_by_law: dict[str, list[dict[str, Any]]] = {}
@@ -161,12 +192,12 @@ def run_lawpack(pack: dict[str, Any], repo: Path, tsx: Path, *, per_law_ms: int 
                     f["law"] = {k: v for k, v in law.to_dict().items()
                                 if k in ("law_id", "statement", "kind", "predicate", "module", "export",
                                          "evidence_class", "approval", "confidence", "limitations",
-                                         "qualification", "grounding", "verification")}
+                                         "qualification", "grounding", "verification", "params", "domain")}
                 rep.findings.append(f)
         elif status == "ERROR":
             rep.errors += 1
         elif status == "SKIP":
             rep.skipped += 1
-    rep.executed = out.get("executed", 0)
+    rep.executed = rep.passed + rep.failed
     rep.duration_ms = int((time.monotonic() - started) * 1000)
     return rep

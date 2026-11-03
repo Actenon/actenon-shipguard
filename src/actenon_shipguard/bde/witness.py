@@ -107,11 +107,14 @@ def reproduce_script(finding: Finding, module: str) -> str:
     grounding = json.dumps(f"{g.get('file')}:{g.get('line_start')}", ensure_ascii=False)
     return f"""// Actenon ShipGuard BDE — standalone reproduction of finding {finding.finding_id}
 // Run from the repository root:  tsx <this-file>.mjs
+import {{ isDeepStrictEqual }} from 'node:util';
 import {{ pathToFileURL }} from 'node:url';
 import {{ resolve }} from 'node:path';
 const MODULE = {json.dumps(module)};
 const ARGS = {args_json};
 const EXPECTED = {expected_json};
+const PREDICATE = {json.dumps(finding.law.get("predicate"))};
+const PARAMS = {json.dumps(finding.law.get("params") or {}, ensure_ascii=False)};
 const mod = await import(pathToFileURL(resolve(MODULE)).href);
 const fn = mod[{json.dumps(finding.export)}];
 if (typeof fn !== 'function') {{ console.error('export not found'); process.exit(2); }}
@@ -125,9 +128,28 @@ console.log('grounding : ' + {grounding});
 console.log('input     : ' + show(ARGS));
 console.log('expected  : ' + show(EXPECTED));
 console.log('observed  : ' + (outcome.threw ? 'threw ' + outcome.name + ': ' + outcome.message : show(outcome.returned)));
-const violated = outcome.threw;
-console.log('verdict   : ' + (violated ? 'VIOLATION (the call threw)' : 'compare expected vs observed'));
-if (violated) process.exit(1);
+if (outcome.returned && typeof outcome.returned.then === 'function') {{
+  outcome.returned.catch?.(() => {{}});
+  console.error('UNSUPPORTED: async result'); process.exit(2);
+}}
+const subset = (expected, observed) => {{
+  if (expected === null || typeof expected !== 'object' || Array.isArray(expected)) return isDeepStrictEqual(expected, observed);
+  return observed !== null && typeof observed === 'object' &&
+    Object.keys(expected).every(k => Object.hasOwn(observed, k) && subset(expected[k], observed[k]));
+}};
+let violated;
+if (PREDICATE === 'example_executable') {{
+  const expected = PARAMS.expected_kind === 'undefined' ? undefined : EXPECTED;
+  violated = outcome.threw || (('expected' in PARAMS || PARAMS.expected_kind === 'undefined') && !subset(expected, outcome.returned));
+}} else if (PREDICATE === 'preservation_case') {{
+  violated = outcome.threw || !isDeepStrictEqual(EXPECTED, outcome.returned);
+}} else {{
+  console.error('OBSERVATION ONLY: relational law requires the exact recorded predicate; use shipguard reproduce.');
+  process.exit(2);
+}}
+console.log('verdict   : ' + (violated ? 'RECORDED LAW VIOLATED' : 'RECORDED LAW HELD'));
+console.log('This re-executes a recorded law; independent ground truth is required to approve a repair.');
+process.exit(violated ? 1 : 0);
 """
 
 
@@ -144,8 +166,12 @@ def write_evidence(out_dir: Path, result: "BDEResult") -> Path:   # noqa: F821
         "generated_at": _now(),
         "mode": result.mode,
         "repo": {"tracked_files": result.tracked_files, "git_head": result.revision,
+                 "tracked_content_sha256": result.source_sha256,
                  "original_untouched": result.original_untouched},
+        "lawpack_sha256": result.lawpack_sha256,
         "module": result.module,
+        "execution_boundary": result.execution_boundary,
+        "runtime_image": result.runtime_image,
         "summary": {
             "laws_discovered": result.laws_total,
             "laws_blocking": result.laws_blocking,

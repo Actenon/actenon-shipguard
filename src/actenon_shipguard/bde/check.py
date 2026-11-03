@@ -71,6 +71,10 @@ class BDEResult:
     changed_files: list[str] = field(default_factory=list)
     changed_exports: list[str] = field(default_factory=list)
     duration_ms: int = 0
+    execution_boundary: str = "not-executed"
+    runtime_image: str | None = None
+    source_sha256: str = ""
+    lawpack_sha256: str = ""
 
     @property
     def exit_code(self) -> int:
@@ -144,6 +148,10 @@ def _overall(findings: list[Finding], rep: ExecutionReport, executed_any: bool,
         return STATUS_CONFIRMED if confirmed else "REGRESSION_OBSERVED"
     if env_failed:
         return STATUS_ENV_FAILURE
+    if findings:
+        return "REVIEW_REQUIRED"
+    if rep.skipped or rep.not_run:
+        return STATUS_INSUFFICIENT
     return STATUS_VERIFIED
 
 
@@ -157,7 +165,8 @@ def _guess_module(clone: Path) -> str | None:
 def run_bde(source_repo: Path, *, module: str | None = None, export: str | None = None,
             base: str | None = None, out_dir: Path, tsx_path: str | None = None,
             allow_local: bool = False, policy: Policy | None = None,
-            work_dir: Path | None = None, include_preservation: bool | None = None) -> BDEResult:
+            work_dir: Path | None = None, include_preservation: bool | None = None,
+            runner: str = "local", image: str | None = None) -> BDEResult:
     """The single implementation behind ``shipguard discover`` and ``shipguard check``.
 
     ``base=None`` (discover): the whole module is the investigation target.
@@ -188,6 +197,7 @@ def run_bde(source_repo: Path, *, module: str | None = None, export: str | None 
         return result
     fingerprint_before = repo_fingerprint(source_repo)
     result.tracked_files = fingerprint_before["tracked_files"]
+    result.source_sha256 = fingerprint_before["tracked_content_sha256"]
 
     work = Path(work_dir) if work_dir else out_dir / "tmp"
     work.mkdir(parents=True, exist_ok=True)
@@ -261,7 +271,7 @@ def run_bde(source_repo: Path, *, module: str | None = None, export: str | None 
         _finish(result, source_repo, fingerprint_before, started)
         return result
 
-    if not _consented(allow_local):
+    if runner == "local" and not _consented(allow_local):
         result.not_run = len(laws)
         result.overall_status = STATUS_INSUFFICIENT
         result.not_checked.append({"reason": "law execution requires explicit local-execution consent "
@@ -272,7 +282,7 @@ def run_bde(source_repo: Path, *, module: str | None = None, export: str | None 
         _finish(result, source_repo, fingerprint_before, started)
         return result
 
-    if tsx is None or not tsx.exists():
+    if runner == "local" and (tsx is None or not tsx.exists()):
         result.overall_status = STATUS_ENV_FAILURE
         result.not_run = len(laws)
         result.notes.append("tsx not found — set SHIPGUARD_TSX or install tsx (see shipguard doctor)")
@@ -287,9 +297,17 @@ def run_bde(source_repo: Path, *, module: str | None = None, export: str | None 
         return result
     if problems:
         result.notes.extend(problems[:5])
+        result.not_run = len(laws) - len(pack["laws"])
+        result.not_checked.append({"reason": "unexecutable or invalid law grounding", "problems": problems})
 
     meta = {lw.law_id: lw for lw in laws}
-    rep = run_lawpack(pack, clone, tsx, laws_meta=meta, mode=mode, per_law_ms=12000, timeout_s=1200)
+    rep = run_lawpack(pack, clone, tsx, laws_meta=meta, mode=mode, per_law_ms=12000, timeout_s=1200,
+                      runner=runner, image=image)
+    result.execution_boundary, result.runtime_image = rep.execution_boundary, rep.runtime_image
+    if runner == "docker":
+        result.limitations[0] = "target code ran in a constrained Docker container; the host and container runtime remain trusted"
+    rep.not_run += result.not_run
+    result.not_run = rep.not_run
     result.outcomes = rep.outcomes
     result.executed, result.passed = rep.executed, rep.passed
     result.failed, result.errors, result.skipped = rep.failed, rep.errors, rep.skipped
@@ -327,11 +345,14 @@ def _finish(result: BDEResult, source_repo: Path, before: dict[str, Any], starte
     result.original_untouched = (after == before)
     result.duration_ms = int((time.monotonic() - started) * 1000)
     if evidence and out_dir is not None:
-        write_evidence(out_dir, result)
+        import hashlib
+        out_dir.mkdir(parents=True, exist_ok=True)
         result.evidence_dir = str(out_dir)
         (out_dir / "bde-laws.json").write_text(json.dumps(
             {"schema_version": 1, "module": result.module, "git_revision": result.revision,
              "laws": [lw.to_dict() for lw in (laws or [])]}, indent=2, ensure_ascii=False, default=str))
+        result.lawpack_sha256 = hashlib.sha256((out_dir / "bde-laws.json").read_bytes()).hexdigest()
+        write_evidence(out_dir, result)
     if clone is not None:
         # the disposable clone is kept under the gitignored work dir for `shipguard reproduce`
         pass

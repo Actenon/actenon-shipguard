@@ -18,10 +18,14 @@ def _stringish(type_text: str | None) -> bool:
     return any(k in t for k in ("string", "input", "str", "`t`", "t extends", "template")) or t in ("t", "")
 
 
-def _arg_spec_from_type(type_text: str | None, domain_string: dict[str, Any] | None) -> dict[str, Any]:
+def _arg_spec_from_type(type_text: str | None, domain_string: dict[str, Any] | None) -> dict[str, Any] | None:
     t = (type_text or "").strip()
-    if t and not _stringish(t) and ("number" in t.lower() or t in ("number",)):
+    if t == "number":
         return {"kind": "int", "min": 0, "max": 100}
+    if t == "boolean":
+        return {"kind": "choice", "values": [False, True]}
+    if t != "string":
+        return None  # Do not guess object, union, generic or untyped input domains.
     sd = domain_string or {}
     return {"kind": "string", "alphabet": sd.get("alphabet") or _STD_ALPHABET,
             "min_len": sd.get("min_len", 0), "max_len": sd.get("max_len", 16)}
@@ -45,7 +49,15 @@ def execution_for(law: BehaviouralLaw) -> dict[str, Any] | None:
 
     if law.predicate == "optional_args_equivalent":
         sd = d.get("string") or {}
-        specs = [_arg_spec_from_type(None, sd)]
+        types = d.get("required_types")
+        if types is None:
+            # Explicit splitter-default hypotheses declare a string domain separately.
+            types = ["string"] if d.get("string") else None
+        if types is None:
+            return None
+        specs = [_arg_spec_from_type(t, sd) for t in types]
+        if any(s is None for s in specs):
+            return None
         entry["gen"] = {"mode": "generated", "arg_specs": specs, "trials": d.get("trials", 200),
                         "seed": d.get("seed", 1234567)}
         return entry

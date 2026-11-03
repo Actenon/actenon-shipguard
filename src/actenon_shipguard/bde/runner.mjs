@@ -20,7 +20,7 @@ import { resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isMainThread, parentPort, workerData } from 'node:worker_threads';
 
-const RUNNER_VERSION = 2;
+const RUNNER_VERSION = 3;
 
 // ---------------------------------------------------------------- seeded determinism -------- //
 function mulberry32(seed) {
@@ -50,7 +50,7 @@ function deepEqual(a, b) {
   if (typeof a === 'object' && typeof b === 'object') {
     const ka = Object.keys(a), kb = Object.keys(b);
     if (ka.length !== kb.length) return false;
-    for (const k of ka) if (!deepEqual(a[k], b[k])) return false;
+    for (const k of ka) if (!Object.hasOwn(b, k) || !deepEqual(a[k], b[k])) return false;
     return true;
   }
   return false;
@@ -63,7 +63,14 @@ function show(v) {
 }
 
 function callFn(fn, args) {
-  try { return { threw: false, result: fn(...args) }; }
+  try {
+    const result = fn(...args);
+    if (result && typeof result.then === 'function') {
+      result.catch?.(() => {});
+      return { unsupported: true, threw: true, name: 'UnsupportedAsync', message: 'async results require an async predicate' };
+    }
+    return { threw: false, result };
+  }
   catch (e) { return { threw: true, name: e?.constructor?.name, message: String(e?.message ?? e) }; }
 }
 
@@ -207,13 +214,13 @@ const PREDICATES = {
     const cReq = callFn(fn, req);
     if (cReq.threw) return { ok: false, kind: 'optional_call_threw', detail: `calling with required arguments only threw ${cReq.name}: ${cReq.message}`, observed: `threw ${cReq.name}: ${cReq.message}` };
     if (params.defaults && params.check === 'deep_equal') {
-      const full = req.concat(params.defaults);
+      const full = req.concat(params.defaults.map((v, i) => params.default_omissions?.[i] ? undefined : v));
       const cFull = callFn(fn, full);
       if (cFull.threw) return { ok: false, kind: 'explicit_default_call_threw', detail: `explicit-defaults call threw ${cFull.name}: ${cFull.message}` };
       if (!deepEqual(cReq.result, cFull.result)) return { ok: false, kind: 'optional_default_mismatch', detail: `without optional args returned ${show(cReq.result)}, with documented defaults returned ${show(cFull.result)}`, observed: cReq.result, expected: cFull.result };
     }
     if (params.defaults && params.check === 'no_throw_and_equal') {
-      const full = req.concat(params.defaults);
+      const full = req.concat(params.defaults.map((v, i) => params.default_omissions?.[i] ? undefined : v));
       const cFull = callFn(fn, full);
       if (!cFull.threw && !deepEqual(cReq.result, cFull.result)) {
         return { ok: false, kind: 'optional_default_mismatch', detail: `without optional args returned ${show(cReq.result)}, with literal defaults returned ${show(cFull.result)}`, observed: cReq.result, expected: cFull.result };
@@ -346,7 +353,24 @@ async function executeLaw(law, modulePath, tsImport) {
   if (!pred) return { law_id: law.law_id, status: 'ERROR', detail: `unknown predicate ${law.predicate}`, trials: 0 };
 
   const gen = law.gen || {};
-  const check = (args) => pred(fn, args, law.params || {}, { mod });
+  if (fn.constructor?.name === 'AsyncFunction') return { law_id: law.law_id, status: 'SKIP', trials: 0, detail: 'async functions are unsupported' };
+  let unsupportedAsync = false;
+  const checkedFn = (...args) => {
+    const value = fn(...args);
+    if (value && typeof value.then === 'function') {
+      unsupportedAsync = true;
+      value.catch?.(() => {});
+      const error = new Error('async results are unsupported');
+      error.code = 'BDE_UNSUPPORTED_ASYNC';
+      throw error;
+    }
+    return value;
+  };
+  const check = (args) => {
+    unsupportedAsync = false;
+    const result = pred(checkedFn, args, law.params || {}, { mod });
+    return unsupportedAsync ? { ok: true, skipped: 'async results are unsupported' } : result;
+  };
 
   // literal-mode laws (examples / preservation / determinism seeds)
   if (gen.mode === 'literal') {
@@ -380,6 +404,8 @@ async function executeLaw(law, modulePath, tsImport) {
   const rnd = mulberry32(gen.seed ?? 1234567);
   const trials = gen.trials ?? 200;
   let executed = 0;
+  let skipped = 0;
+  const witnessKeys = new Set();
   let cases = [];
   if (gen.grid) {
     cases = boundaryGrid(gen.grid.core_alphabet, gen.grid.separator_choices || [[]]);
@@ -390,9 +416,13 @@ async function executeLaw(law, modulePath, tsImport) {
   for (const args of cases) {
     executed++;
     const r = check(args);
+    if (r?.skipped) { skipped++; continue; }
     if (r && !r.ok && !r.skipped) {
       const s = shrinkArgs(args, check);
       const m = check(s.args);
+      const key = JSON.stringify([s.args, m?.kind]);
+      if (witnessKeys.has(key)) continue;
+      witnessKeys.add(key);
       witnesses.push({
         law_id: law.law_id, predicate: law.predicate, export: law.export,
         args: s.args, original_args: args, shrunk: s.shrunk,
@@ -411,7 +441,8 @@ async function executeLaw(law, modulePath, tsImport) {
     return { law_id: law.law_id, status: 'FAIL', trials: executed, shrunk: witnesses[0].shrunk,
              finding: witnesses[0], findings: witnesses };
   }
-  return { law_id: law.law_id, status: 'PASS', trials: executed };
+  return { law_id: law.law_id, status: executed === skipped ? 'SKIP' : 'PASS',
+           trials: executed - skipped, detail: skipped ? `${skipped} generated inputs out of scope` : undefined };
 }
 
 // ---------------------------------------------------------------- worker bootstrap ------------ //
